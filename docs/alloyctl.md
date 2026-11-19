@@ -55,6 +55,27 @@ arquivos locais e não instala nem atualiza o `alloyctl`.
   de `channel`) passam para `stable` na primeira execução. Veja
   [migracao.md](migracao.md).
 
+## Versão do Alloy
+
+Cada versão do `alloyctl` instala **uma versão fixa do Alloy**, definida em
+[`alloy.Dockerfile`](../alloy.Dockerfile) na raiz do repositório (linha
+`FROM grafana/alloy:vX.Y.Z`). O arquivo é baixado junto com o núcleo.
+
+- **Primeira instalação**: instala a versão fixada.
+- **Reaplicar configuração**: nunca muda a versão de um Alloy já instalado.
+- **[3] Atualizar Alloy** (`upgrade`): leva o Alloy para a versão fixada,
+  inclusive para baixo, se alguém tiver atualizado na mão.
+- **Linux**: o pacote fica retido (`apt-mark hold alloy`) para um
+  `apt upgrade` do sistema não trocar a versão. A desinstalação libera o
+  pacote antes de remover.
+- **Windows**: o instalador oficial vem da release da Grafana com aquela
+  versão, conferido pelo `SHA256SUMS` e pela assinatura.
+- O diagnóstico marca em amarelo um Alloy instalado em versão diferente da
+  fixada.
+
+O Dependabot abre um PR quando sai uma versão nova do Alloy. Veja
+[release.md](release.md#atualizar-a-versão-do-alloy).
+
 ## Comandos diretos (automação)
 
 Os mesmos comandos valem para `alloyctl` e para o ponto de entrada baixado
@@ -67,7 +88,7 @@ Os mesmos comandos valem para `alloyctl` e para o ponto de entrada baixado
 | `check` | `check` | testa a credencial gravada, sem alterar nada |
 | `rotate` | `rotate` | troca a credencial e reinicia o Alloy |
 | `modules docker\|none` | `modules hyperv,sqlanywhere,mysql,dbct\|none` | define os módulos opcionais (os não listados são desativados) |
-| `upgrade` | `upgrade` | atualiza o Alloy |
+| `upgrade` | `upgrade` | instala a versão do Alloy fixada nesta versão do `alloyctl` |
 | `status` | `status` | diagnóstico |
 | `uninstall [--yes]` | `uninstall [-Yes]` | remove o Alloy, mantendo credencial, configuração e o `alloyctl` |
 | `purge [--yes]` | `purge [-Yes]` | limpeza completa (inclui o `alloyctl`) |

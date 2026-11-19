@@ -9,6 +9,33 @@ a atualização automática troca só o `alloyctl`, nunca a configuração do Al
 
 ## [Não publicado]
 
+Proposta: **v1.1.0**. Não exige **[1] Reaplicar**. **[3] Atualizar Alloy**
+leva cada máquina para a v1.19.2 do Alloy (as instaladas antes seguem na
+versão que já têm até alguém executar).
+
+### Adicionado
+
+- **Versão do Alloy fixada**: v1.19.2 (`alloy.Dockerfile`). Primeira
+  instalação e **[3] Atualizar Alloy** instalam essa versão; reaplicar nunca
+  muda a versão. No Linux o pacote fica retido (`apt-mark hold`). O
+  diagnóstico aponta Alloy instalado em versão diferente da fixada.
+- Dependabot para a versão do Alloy.
+- Testes de comportamento: bats (canais, troca do `alloyctl`, versão fixada,
+  downloads sob demanda) e Pester (partes do instalador, canais, `Common.ps1`).
+- Conferência dos produtores contra os contratos do repositório `grafana`
+  (jobs, métricas dos coletores, heartbeat, leitor de backups), em todo PR e
+  semanalmente.
+- CI também nos branches de trabalho (`claude/**`).
+
+### Alterado
+
+- `install.ps1` dividido em `ops/install/` (pacote, backup e um arquivo por
+  módulo). `install.sh` e `install.ps1` usam as constantes de `lib/` em vez de
+  repeti-las; funções repetidas entre `install.ps1`, `heartbeat-setup.ps1` e
+  `State.ps1` foram para `Common.ps1`.
+- Um `alloyctl` v1.0.0 que se atualiza para esta versão baixa o
+  `alloy.Dockerfile` na primeira execução (a v1.0.0 não o conhecia).
+
 ## [1.0.0] - 2026-11-19
 
 Primeira versão no repositório próprio. Até aqui o código ficava em

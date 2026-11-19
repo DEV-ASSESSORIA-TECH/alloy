@@ -30,40 +30,6 @@ if ((Get-AlloyPerfil) -eq 'estacao' -and -not $Test -and -not $Remove) {
     throw 'Heartbeat nao se aplica ao perfil estacao (maquinas descartaveis, sem alertas).'
 }
 
-function Ensure-Directory([string]$Path) {
-    if (Test-Path -LiteralPath $Path) {
-        $item = Get-Item -LiteralPath $Path -Force
-        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-            throw "Diretorio invalido: $Path"
-        }
-    } else {
-        New-Item -ItemType Directory -Path $Path -Force | Out-Null
-    }
-}
-
-# Somente SYSTEM e Administradores (a pasta guarda a URL e codigo executado como SYSTEM).
-function Set-PrivateDirectoryAcl([string]$Path) {
-    $acl = [System.Security.AccessControl.DirectorySecurity]::new()
-    $acl.SetAccessRuleProtection($true, $false)
-    $acl.SetOwner([System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
-    $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
-    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
-        $id = [System.Security.Principal.SecurityIdentifier]::new($sid)
-        $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($id, [System.Security.AccessControl.FileSystemRights]::FullControl, $inherit, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)
-        $acl.AddAccessRule($rule)
-    }
-    Set-Acl -LiteralPath $Path -AclObject $acl
-}
-
-function Assert-ScriptSyntax([string]$Path) {
-    $tokens = $null
-    $errors = $null
-    [void][System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
-    if ($errors -and $errors.Count -gt 0) {
-        throw "$(Split-Path -Leaf $Path) com erro de sintaxe (linha $($errors[0].Extent.StartLineNumber)): $($errors[0].Message)"
-    }
-}
-
 # URL colada do Kuma (com ou sem ?status=up&msg=OK&ping=) -> URL base de push.
 function ConvertTo-PushUrl([string]$Text) {
     $value = ([string]$Text).Trim().Trim('"', "'")

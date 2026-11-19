@@ -93,6 +93,8 @@ log 'Parando o servico...'
 systemctl disable --now alloy.service >/dev/null 2>&1 || true
 
 if [[ $package_known == true ]]; then
+  # O install.sh retem o pacote na versao fixada (apt-mark hold).
+  apt-mark unhold alloy >/dev/null 2>&1 || true
   if [[ $purge == true ]]; then
     log 'Removendo o pacote alloy (purge)...'
     apt-get purge -y alloy

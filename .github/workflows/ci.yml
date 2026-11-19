@@ -2,9 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'claude/**']
   pull_request:
   workflow_call:
+  # Semanal: pega contrato alterado no repositorio grafana sem mudanca aqui.
+  schedule:
+    - cron: '17 11 * * 1'
 
 permissions:
   contents: read
@@ -21,6 +24,10 @@ jobs:
         run: python3 -m py_compile linux/ops/setup-credentials.py linux/heartbeat/heartbeat.py
       - name: Caminhos baixados pelo alloyctl
         run: python3 tests/check_paths.py
+      - name: Testes (bats)
+        run: |
+          sudo apt-get install -y -q bats
+          bats tests/linux
       - name: .ps1 somente ASCII (Windows PowerShell 5.1)
         run: |
           if LC_ALL=C grep -rlP '[^\x00-\x7F]' --include='*.ps1' windows; then
@@ -29,7 +36,7 @@ jobs:
           fi
 
   windows:
-    name: Windows (PowerShell 5.1, PSScriptAnalyzer)
+    name: Windows (PowerShell 5.1, PSScriptAnalyzer, Pester)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,17 +64,41 @@ jobs:
             -ExcludeRule PSAvoidUsingConvertToSecureStringWithPlainText
           $results | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
           if ($results) { exit 1 }
+      - name: Testes (Pester 5)
+        shell: powershell
+        run: |
+          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -MinimumVersion 5.5.0
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'tests/windows'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $config
+
+  contracts:
+    name: Contratos do Grafana (produtores)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Conferir contra DEV-ASSESSORIA-TECH/grafana (main)
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 tests/contracts/check_contracts.py
 
   alloy:
-    name: Configuracoes .alloy (alloy fmt)
+    name: Configuracoes .alloy (alloy fmt na versao fixada)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: alloy fmt
         run: |
+          # Mesma versao que o alloyctl instala (alloy.Dockerfile).
+          image=$(sed -n 's/^FROM[[:space:]]\{1,\}\(grafana\/alloy:v[0-9.]*\)[[:space:]]*$/\1/p' alloy.Dockerfile)
+          [[ -n $image ]] || { echo '::error file=alloy.Dockerfile::linha FROM grafana/alloy:vX.Y.Z nao encontrada'; exit 1; }
+          echo "imagem: $image"
           status=0
           for file in linux/modules/*.alloy windows/modules/*.alloy; do
-            if ! docker run --rm -v "$PWD:/w:ro" -w /w grafana/alloy:v1.11.2 fmt "$file" >/dev/null; then
+            if ! docker run --rm -v "$PWD:/w:ro" -w /w "$image" fmt "$file" >/dev/null; then
               echo "::error file=$file::alloy fmt falhou"
               status=1
             fi

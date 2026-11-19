@@ -1,4 +1,5 @@
-# Funcoes compartilhadas por alloy.ps1 e uninstall.ps1 (carregar com ". ").
+# Funcoes compartilhadas por alloy.ps1, install.ps1, uninstall.ps1 e
+# heartbeat-setup.ps1 (carregar com ". ").
 # Constantes, saida, confirmacoes e download via raw.
 # Manter os .ps1 em ASCII: o Windows PowerShell 5.1 le arquivos sem BOM como ANSI.
 
@@ -9,14 +10,21 @@ $Secret      = Join-Path $Base 'oauth-client-secret'
 $ConfigDir   = Join-Path $Base 'config'
 $DataDir     = Join-Path $Base 'data'
 $BackupDir   = Join-Path $Base 'backups'
+$BookmarkDir = Join-Path $DataDir 'bookmarks'
+# Modulos com tarefa agendada: scripts\, textfile\<modulo>\ e logs\ sao
+# compartilhados; cada modulo le apenas o proprio subdiretorio do textfile.
+$ScriptsDir  = Join-Path $Base 'scripts'
+$TextfileDir = Join-Path $Base 'textfile'
 $InstallDir  = Join-Path $env:ProgramFiles 'GrafanaLabs\Alloy'
 $Exe         = Join-Path $InstallDir 'alloy-windows-amd64.exe'
 $Registry    = 'HKLM:\SOFTWARE\GrafanaLabs\Alloy'
 $ServiceName = 'Alloy'
 $ReadyUrl    = 'http://127.0.0.1:12345/-/ready'
+# Assinatura propria nas chamadas HTTP (auth/mon ficam atras da Cloudflare).
+$UserAgent   = 'AssessoriaTech-Alloy-Installer/1.0'
 # Comando alloyctl (mesmo valor do alloy.ps1, que roda antes desta lib).
 $AlloyCtlDir = Join-Path $env:ProgramFiles 'AssessoriaTech\alloyctl'
-# Pasta fixa do instalador oficial (mesmo valor do install.ps1).
+# Pasta fixa do instalador oficial (ops\install\Package.ps1, docs/antivirus.md).
 $AlloyInstallerDir = Join-Path $env:ProgramData 'AssessoriaTech\alloy-installer'
 $HyperVFile  = Join-Path $ConfigDir 'hyperv.alloy'
 $SqlAnywhereFile = Join-Path $ConfigDir 'sqlanywhere.alloy'
@@ -83,6 +91,25 @@ function Get-AlloyRef {
     return $ref
 }
 
+# Versao do Alloy fixada nesta versao do alloyctl. Fonte unica: o
+# alloy.Dockerfile na raiz do repositorio ("FROM grafana/alloy:vX.Y.Z"), no
+# formato que o Dependabot atualiza. O alloy.ps1 le o arquivo e repassa a versao
+# em ALLOY_VERSION para os scripts filhos.
+function Read-AlloyVersionFile([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "Arquivo de versao do Alloy ausente: $Path" }
+    foreach ($line in [IO.File]::ReadAllLines($Path)) {
+        if ($line -match '^\s*FROM\s+grafana/alloy:v([0-9]+\.[0-9]+\.[0-9]+)\s*$') { return $Matches[1] }
+    }
+    throw "Versao do Alloy nao encontrada em $Path (esperado: FROM grafana/alloy:vX.Y.Z)."
+}
+function Get-AlloyPinnedVersion {
+    $version = [string]$env:ALLOY_VERSION
+    if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+        throw "Versao do Alloy ausente ou invalida (ALLOY_VERSION='$version'). Execute pelo alloyctl."
+    }
+    return $version
+}
+
 # Cliente HTTP unico: as requisicoes reutilizam a mesma conexao TLS.
 function Get-HttpClient {
     if (-not $script:HttpClient) {
@@ -90,9 +117,22 @@ function Get-HttpClient {
         Add-Type -AssemblyName System.Net.Http
         $script:HttpClient = [System.Net.Http.HttpClient]::new()
         $script:HttpClient.Timeout = [TimeSpan]::FromSeconds(30)
-        $script:HttpClient.DefaultRequestHeaders.UserAgent.ParseAdd('AssessoriaTech-Alloy-Installer/1.0')
+        $script:HttpClient.DefaultRequestHeaders.UserAgent.ParseAdd($UserAgent)
     }
     return $script:HttpClient
+}
+
+# Cliente HTTP sem proxy para 127.0.0.1: o Invoke-WebRequest do 5.1 tenta
+# descobrir proxy (WPAD) e pode levar segundos por tentativa.
+function Get-LocalHttp {
+    if (-not $script:LocalHttp) {
+        Add-Type -AssemblyName System.Net.Http
+        $handler = [System.Net.Http.HttpClientHandler]::new()
+        $handler.UseProxy = $false
+        $script:LocalHttp = [System.Net.Http.HttpClient]::new($handler)
+        $script:LocalHttp.Timeout = [TimeSpan]::FromSeconds(2)
+    }
+    return $script:LocalHttp
 }
 
 # Baixa do raw somente os arquivos ausentes em $Destination.
@@ -121,6 +161,55 @@ function Save-RemoteFiles([string]$Destination, [string[]]$Names) {
             $response.Dispose()
         }
     }
+}
+
+function Ensure-Directory([string]$Path) {
+    if (Test-Path -LiteralPath $Path) {
+        $item = Get-Item -LiteralPath $Path -Force
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Diretorio invalido: $Path"
+        }
+    } else {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    }
+}
+
+# SYSTEM e Administradores com controle total; -Writers recebe Modify (gravar,
+# substituir e apagar arquivos, sem alterar permissoes).
+function Set-PrivateDirectoryAcl([string]$Path, [System.Security.Principal.SecurityIdentifier[]]$Writers = @()) {
+    $acl = [System.Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetAccessRuleProtection($true, $false)
+    $admin = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+    $acl.SetOwner($admin)
+    $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+    foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+        $id = [System.Security.Principal.SecurityIdentifier]::new($sid)
+        $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($id, [System.Security.AccessControl.FileSystemRights]::FullControl, $inherit, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)
+        $acl.AddAccessRule($rule)
+    }
+    foreach ($id in @($Writers | Where-Object { $null -ne $_ })) {
+        $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($id, [System.Security.AccessControl.FileSystemRights]::Modify, $inherit, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)
+        $acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
+# O script roda como SYSTEM: so e instalado se o parser do PowerShell aceitar.
+function Assert-ScriptSyntax([string]$Path) {
+    $tokens = $null
+    $errors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+    if ($errors -and $errors.Count -gt 0) {
+        $first = $errors[0]
+        throw "$(Split-Path -Leaf $Path) com erro de sintaxe (linha $($first.Extent.StartLineNumber)): $($first.Message)"
+    }
+}
+
+# Versao instalada (Programas e Recursos), sem o "v"; vazio se nao houver.
+function Get-InstalledAlloyVersion {
+    $entry = Get-AlloyUninstallEntry
+    if ($entry -and $entry.DisplayVersion) { return (([string]$entry.DisplayVersion).Trim() -replace '^v', '') }
+    return ''
 }
 
 # Entrada do Alloy em "Programas e Recursos" (versao e desinstalador).

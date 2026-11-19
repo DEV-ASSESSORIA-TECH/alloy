@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-log() { printf '[Alloy] %s\n' "$*"; }
-fail() { printf '[Alloy] ERRO: %s\n' "$*" >&2; exit 1; }
+script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
+# shellcheck source=../lib/common.sh
+source "$script_dir/../lib/common.sh"
 
 # O servico pode ainda nao estar carregado durante a primeira instalacao.
 # So tentar limpar falhas quando a unidade realmente estiver em estado failed.
@@ -16,7 +17,7 @@ usage() {
   printf 'Sem parametro: detecta Docker, preserva modulo existente e nao altera a versao do Alloy.\n'
   printf '  --modules docker  habilita Docker explicitamente\n'
   printf '  --modules none    desabilita o modulo Docker\n'
-  printf '  --upgrade         atualiza o pacote Alloy via APT (opt-in)\n'
+  printf '  --upgrade         instala a versao do Alloy fixada nesta versao do alloyctl (opt-in)\n'
 }
 
 upgrade=false
@@ -33,20 +34,15 @@ done
 case "$selection" in auto|docker|none) ;; *) fail 'Use --modules docker ou --modules none.' ;; esac
 
 [[ $EUID -eq 0 ]] || fail 'Execute com sudo.'
-[[ -s /etc/alloy/oauth-client-secret ]] || fail 'Credencial ausente: execute alloy.sh (ou setup-credentials.py) primeiro.'
-[[ ! -L /etc/alloy ]] || fail '/etc/alloy nao pode ser link simbolico.'
+[[ -s $SECRET ]] || fail 'Credencial ausente: execute alloy.sh (ou setup-credentials.py) primeiro.'
+[[ ! -L $ETC_DIR ]] || fail "$ETC_DIR nao pode ser link simbolico."
 command -v apt-get >/dev/null || fail 'APT obrigatorio (Debian/Ubuntu).'
 command -v curl >/dev/null || fail 'curl ausente; instale antes de executar.'
 command -v python3 >/dev/null || fail 'python3 ausente; instale antes de executar.'
 command -v cmp >/dev/null || fail 'cmp ausente; instale coreutils/diffutils.'
 
-script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 # Arquivos .alloy em ../modules (mesma estrutura do repositorio).
 modules_dir=$script_dir/../modules
-# Mesmos valores de lib/common.sh (install.sh roda sem a lib).
-TEXTFILE_DIR=/var/lib/alloy-textfile
-BACKUP_TEXTFILE_DIR=$TEXTFILE_DIR/backup
-BACKUP_GROUP=alloy-backup
 [[ -s "$modules_dir/config.alloy" ]] || fail 'config.alloy ausente em modules/.'
 
 docker_ready() {
@@ -61,7 +57,7 @@ case "$selection" in
           use_docker=true ;;
   none) log 'Instalando apenas a base Linux.' ;;
   auto)
-    if [[ -f /etc/alloy/docker.alloy ]]; then
+    if [[ -f $ETC_DIR/docker.alloy ]]; then
       docker_ready || fail 'Modulo Docker existente, mas Docker indisponivel. Use --modules none para remover.'
       use_docker=true
       log 'Modulo Docker existente sera preservado.'
@@ -102,21 +98,25 @@ fi
 
 # Preservar modulos locais adicionais durante a validacao.
 shopt -s nullglob
-for existing in /etc/alloy/*.alloy; do
+for existing in "$ETC_DIR"/*.alloy; do
   name=$(basename -- "$existing")
   [[ $name == config.alloy || $name == docker.alloy || $name == backup.alloy ]] || cp -- "$existing" "$stage/$name"
 done
 shopt -u nullglob
 
-# Nunca atualizar o agente implicitamente ao alterar configuracoes/modulos.
-# --upgrade e a unica opcao que atualiza um Alloy ja instalado.
+# Versao do Alloy: a fixada nesta versao do alloyctl (alloy.Dockerfile, lido
+# pelo alloy.sh e repassado em ALLOY_VERSION). Nunca atualizar o agente
+# implicitamente ao alterar configuracoes/modulos: --upgrade e a unica opcao
+# que muda a versao de um Alloy ja instalado. O pacote fica retido (apt-mark
+# hold) para um "apt upgrade" do sistema nao trocar a versao.
+pinned_version=$(pinned_alloy_version) || exit 1
 alloy_installed=false
 if [[ $(dpkg-query -W -f='${Status}' alloy 2>/dev/null || true) == 'install ok installed' ]]; then
   alloy_installed=true
 fi
 alloy_changed=false
 if [[ $alloy_installed == true && $upgrade == false ]]; then
-  log "Alloy ja instalado (versao $(dpkg-query -W -f='${Version}' alloy)). Ignorando APT."
+  log "Alloy ja instalado (versao $(dpkg-query -W -f='${Version}' alloy); fixada: $pinned_version). Ignorando APT."
 else
   # needrestart nao deve reiniciar servicos existentes (ex.: Bitdefender).
   export NEEDRESTART_MODE=l DEBIAN_FRONTEND=noninteractive
@@ -124,7 +124,7 @@ else
   apt-get update
 
   # Evitar atualizar dependencias ja instaladas durante o bootstrap.
-  # Instalar somente pacotes ausentes; --upgrade atualiza apenas o Alloy.
+  # Instalar somente pacotes ausentes; --upgrade muda apenas o Alloy.
   missing_packages=()
   for pkg in ca-certificates curl python3; do
     if [[ $(dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null || true) != 'install ok installed' ]]; then
@@ -139,35 +139,38 @@ else
   fi
 
   install -d -m 0755 /etc/apt/keyrings
-  curl -fsSL https://apt.grafana.com/gpg-full.key -o /etc/apt/keyrings/grafana.asc
-  chmod 0644 /etc/apt/keyrings/grafana.asc
-  printf '%s\n' 'deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main' > /etc/apt/sources.list.d/grafana.list
+  curl -fsSL https://apt.grafana.com/gpg-full.key -o "$APT_KEY"
+  chmod 0644 "$APT_KEY"
+  printf 'deb [signed-by=%s] https://apt.grafana.com stable main\n' "$APT_KEY" > "$APT_SOURCE"
   apt-get update
 
+  package_version=$(apt-cache madison alloy | apt_package_version "$pinned_version")
+  [[ -n $package_version ]] || fail "Alloy $pinned_version nao encontrado no repositorio APT da Grafana."
+  apt-mark unhold alloy >/dev/null 2>&1 || true
   if [[ $alloy_installed == true ]]; then
     before_version=$(dpkg-query -W -f='${Version}' alloy)
-    apt-get install -y --only-upgrade alloy
-    after_version=$(dpkg-query -W -f='${Version}' alloy)
-    if [[ $before_version != "$after_version" ]]; then
-      alloy_changed=true
-      log "Alloy atualizado: $before_version -> $after_version."
+    if [[ $before_version == "$package_version" ]]; then
+      log "Alloy ja esta na versao fixada: $before_version."
     else
-      log "Alloy ja estava na versao mais recente: $after_version."
+      apt-get install -y --allow-downgrades "alloy=$package_version"
+      alloy_changed=true
+      log "Alloy: $before_version -> $package_version (versao fixada nesta versao do alloyctl)."
     fi
   else
-    apt-get install -y alloy
+    apt-get install -y "alloy=$package_version"
     alloy_changed=true
-    log "Alloy instalado: $(dpkg-query -W -f='${Version}' alloy)."
+    log "Alloy instalado: $package_version."
   fi
+  apt-mark hold alloy >/dev/null
 fi
 command -v alloy >/dev/null || fail 'Pacote presente, mas binario alloy indisponivel.'
 
 log 'Validando conjunto completo de arquivos .alloy...'
 alloy validate "$stage" || fail 'Configuracao invalida. Configuracao existente mantida.'
 
-install -d -o root -g alloy -m 0750 /etc/alloy
-chown root:alloy /etc/alloy/oauth-client-secret
-chmod 0640 /etc/alloy/oauth-client-secret
+install -d -o root -g alloy -m 0750 "$ETC_DIR"
+chown root:alloy "$SECRET"
+chmod 0640 "$SECRET"
 usermod -aG adm,systemd-journal alloy
 # Pasta dos backups (contrato backup.yml do repositorio grafana): produtores
 # externos gravam <service>__<backup_id>.prom. Escrita para root e para o grupo
@@ -186,9 +189,9 @@ else
 fi
 
 # Montar o estado desejado ANTES de alterar a configuracao instalada.
-env_file=/etc/default/alloy
-dropin_dir=/etc/systemd/system/alloy.service.d
-dropin_file="$dropin_dir/zz-assessoriatech-execution.conf"
+env_file=$ENV_FILE
+dropin_dir=$DROPIN_DIR
+dropin_file=$DROPIN_FILE
 if [[ $use_docker == true ]]; then
   desired_user=root
   desired_group=root
@@ -215,8 +218,8 @@ same_file() {
 files_changed=false
 for name in config.alloy docker.alloy backup.alloy; do
   if [[ -f "$stage/$name" ]]; then
-    same_file "$stage/$name" "/etc/alloy/$name" || files_changed=true
-  elif [[ -e "/etc/alloy/$name" || -L "/etc/alloy/$name" ]]; then
+    same_file "$stage/$name" "$ETC_DIR/$name" || files_changed=true
+  elif [[ -e "$ETC_DIR/$name" || -L "$ETC_DIR/$name" ]]; then
     files_changed=true
   fi
 done
@@ -246,7 +249,7 @@ stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 backup=$(mktemp -d)
 trap 'rm -rf -- "$stage" "$backup"' EXIT
 for name in config.alloy docker.alloy backup.alloy; do
-  [[ ! -f "/etc/alloy/$name" ]] || cp -a -- "/etc/alloy/$name" "$backup/$name"
+  [[ ! -f "$ETC_DIR/$name" ]] || cp -a -- "$ETC_DIR/$name" "$backup/$name"
 done
 [[ ! -f "$env_file" ]] || cp -a -- "$env_file" "$backup/default.alloy"
 [[ ! -f "$dropin_file" ]] || cp -a -- "$dropin_file" "$backup/execution.conf"
@@ -255,9 +258,9 @@ rollback() {
   log 'Restaurando configuracao anterior...'
   for name in config.alloy docker.alloy backup.alloy; do
     if [[ -f "$backup/$name" ]]; then
-      cp -a -- "$backup/$name" "/etc/alloy/$name"
+      cp -a -- "$backup/$name" "$ETC_DIR/$name"
     else
-      rm -f -- "/etc/alloy/$name"
+      rm -f -- "$ETC_DIR/$name"
     fi
   done
   if [[ -f "$backup/default.alloy" ]]; then
@@ -277,7 +280,7 @@ rollback() {
     restored=false
     for _ in {1..12}; do
       if systemctl is-active --quiet alloy &&
-         curl -fsS --max-time 2 http://127.0.0.1:12345/-/ready >/dev/null 2>&1; then
+         curl -fsS --max-time 2 "$READY_URL" >/dev/null 2>&1; then
         restored=true
         break
       fi
@@ -298,12 +301,12 @@ rollback() {
 if [[ $files_changed == true ]]; then
   for name in config.alloy docker.alloy backup.alloy; do
     if [[ -f "$stage/$name" ]]; then
-      if ! same_file "$stage/$name" "/etc/alloy/$name"; then
-        install -o root -g alloy -m 0640 "$stage/$name" "/etc/alloy/.$name.tmp"
-        mv -f -- "/etc/alloy/.$name.tmp" "/etc/alloy/$name"
+      if ! same_file "$stage/$name" "$ETC_DIR/$name"; then
+        install -o root -g alloy -m 0640 "$stage/$name" "$ETC_DIR/.$name.tmp"
+        mv -f -- "$ETC_DIR/.$name.tmp" "$ETC_DIR/$name"
       fi
     else
-      rm -f -- "/etc/alloy/$name"
+      rm -f -- "$ETC_DIR/$name"
     fi
   done
 fi
@@ -329,7 +332,7 @@ fi
 ready=false
 for _ in {1..12}; do
   if systemctl is-active --quiet alloy &&
-     curl -fsS --max-time 2 http://127.0.0.1:12345/-/ready >/dev/null 2>&1; then
+     curl -fsS --max-time 2 "$READY_URL" >/dev/null 2>&1; then
     ready=true
     break
   fi
@@ -342,12 +345,12 @@ if [[ $ready != true ]]; then
 fi
 
 # Backups persistentes apenas quando houve alteracoes; nenhum backup vazio.
-install -d -m 0700 /etc/alloy/backups
+install -d -m 0700 "$ETC_DIR/backups"
 for name in config.alloy docker.alloy backup.alloy; do
-  [[ ! -f "$backup/$name" ]] || cp -a -- "$backup/$name" "/etc/alloy/backups/$name.$stamp"
+  [[ ! -f "$backup/$name" ]] || cp -a -- "$backup/$name" "$ETC_DIR/backups/$name.$stamp"
 done
-[[ ! -f "$backup/default.alloy" ]] || cp -a -- "$backup/default.alloy" "/etc/alloy/backups/default.alloy.$stamp"
-[[ ! -f "$backup/execution.conf" ]] || cp -a -- "$backup/execution.conf" "/etc/alloy/backups/execution.conf.$stamp"
+[[ ! -f "$backup/default.alloy" ]] || cp -a -- "$backup/default.alloy" "$ETC_DIR/backups/default.alloy.$stamp"
+[[ ! -f "$backup/execution.conf" ]] || cp -a -- "$backup/execution.conf" "$ETC_DIR/backups/execution.conf.$stamp"
 
 log "Alloy ativo e pronto como $desired_user:$desired_group."
 log "Modulos: Linux$( [[ $use_docker == true ]] && printf ' + Docker' || true ) + leitura de backups ($BACKUP_TEXTFILE_DIR)"

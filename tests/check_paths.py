@@ -10,7 +10,7 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-REL = re.compile(r"""['"]?((?:lib|ops|heartbeat|modules|collectors)/[A-Za-z0-9._-]+\.(?:sh|py|ps1|alloy))['"]?""")
+REL = re.compile(r"""['"]?((?:lib|ops|heartbeat|modules|collectors)/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\.(?:sh|py|ps1|alloy))['"]?""")
 errors = []
 
 
@@ -39,7 +39,9 @@ for name in re.findall(r"^\s*module_file\s+([A-Za-z0-9._-]+)\s*$", install_sh, r
 
 # Windows: Copy-ModuleFile 'NOME' ou $Variavel (install.ps1) -> modules/ ou collectors/
 install_ps1 = (ROOT / "windows/ops/install.ps1").read_text(encoding="utf-8")
-variables = dict(re.findall(r"^\$(\w+)\s*=\s*'([A-Za-z0-9._-]+\.(?:ps1|alloy))'", install_ps1, re.M))
+install_sources = install_ps1 + "".join(
+    p.read_text(encoding="utf-8") for p in sorted((ROOT / "windows/ops/install").glob("*.ps1")))
+variables = dict(re.findall(r"^\$(\w+)\s*=\s*'([A-Za-z0-9._-]+\.(?:ps1|alloy))'", install_sources, re.M))
 for arg in re.findall(r"Copy-ModuleFile\s+('[^']+'|\$\w+)", install_ps1):
     name = arg.strip("'") if arg.startswith("'") else variables.get(arg[1:])
     if not name:
@@ -53,6 +55,26 @@ for arg in re.findall(r"Copy-ModuleFile\s+('[^']+'|\$\w+)", install_ps1):
 for name in re.findall(r"(?:servidor|estacao)\s*=\s*'([A-Za-z0-9._-]+\.alloy)'", install_ps1):
     check("windows", f"modules/{name}", "windows/ops/install.ps1 (perfil)")
     total += 1
+
+# Windows: partes carregadas pelo install.ps1 (foreach ... @('Shared', ...))
+parts_match = re.search(r"foreach \(\$part in @\(([^)]*)\)\)", install_ps1)
+if not parts_match:
+    errors.append("windows/ops/install.ps1: lista de partes (foreach $part) nao encontrada")
+else:
+    parts = re.findall(r"'([A-Za-z0-9]+)'", parts_match.group(1))
+    alloy_ps1 = (ROOT / "windows/alloy.ps1").read_text(encoding="utf-8")
+    on_disk = {p.stem for p in (ROOT / "windows/ops/install").glob("*.ps1")}
+    for part in parts:
+        check("windows", f"ops/install/{part}.ps1", "windows/ops/install.ps1")
+        if f"'ops/install/{part}.ps1'" not in alloy_ps1:
+            errors.append(f"windows/alloy.ps1: $InstallerFiles sem ops/install/{part}.ps1 (nao seria baixado)")
+        total += 1
+    for extra in sorted(on_disk - set(parts)):
+        errors.append(f"windows/ops/install/{extra}.ps1 nao e carregado pelo install.ps1")
+
+# Versao do Alloy fixada (raiz), baixada junto com o nucleo.
+if not (ROOT / "alloy.Dockerfile").is_file():
+    errors.append("alloy.Dockerfile nao existe")
 
 if errors:
     print("\n".join(errors))

@@ -217,7 +217,12 @@ diagnose() {
   status=$(service_status)
   if alloy_installed; then
     ui_row Estado "${status%%|*}" "${status#*|} ($(systemctl is-enabled alloy 2>/dev/null || printf '?'))"
-    ui_row Versao none "v$(alloy_version)"
+    installed_version=$(alloy_version)
+    if [[ -n ${ALLOY_VERSION:-} && ${installed_version%%-*} != "$ALLOY_VERSION" ]]; then
+      ui_row Versao warn "v$installed_version (fixada: v$ALLOY_VERSION; use [3] Atualizar Alloy)"
+    else
+      ui_row Versao none "v$installed_version"
+    fi
     since=$(systemctl show alloy --property=ActiveEnterTimestamp --value 2>/dev/null || true)
     if service_active && [[ -n $since ]]; then ui_row Desde none "$since"; fi
     ui_row Usuario none "$(service_user)"
