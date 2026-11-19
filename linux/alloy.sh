@@ -356,6 +356,11 @@ source "$src/lib/state.sh"
 # Versao do Alloy fixada nesta versao do alloyctl: a pasta do alloyctl e a
 # temporaria guardam o arquivo ao lado do alloy.sh; o clone, na raiz.
 if [[ $mode == local ]]; then version_file=$src/../$TOOL_VERSION_FILE; else version_file=$src/$TOOL_VERSION_FILE; fi
+# O alloyctl v1.0.0 nao baixava o arquivo ao se atualizar: busca na mesma versao.
+if [[ $mode == installed && ! -s $version_file ]]; then
+  curl -fsSL --proto '=https' --connect-timeout 10 --retry 2 -A "$TOOL_UA" -o "$version_file" \
+    "$TOOL_RAW/$ALLOY_REF/$TOOL_VERSION_FILE" || rm -f -- "$version_file"
+fi
 ALLOY_VERSION=$(read_alloy_version "$version_file") || fail 'Versao do Alloy indisponivel; rode o comando do README.'
 export ALLOY_VERSION
 

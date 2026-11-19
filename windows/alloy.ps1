@@ -537,6 +537,15 @@ try {
     # Versao do Alloy fixada nesta versao do alloyctl: a pasta do alloyctl e a
     # temporaria guardam o arquivo ao lado do alloy.ps1; o clone, na raiz.
     $versionFile = if ($toolMode -eq 'local') { Join-Path (Split-Path -Parent $PSScriptRoot) $ToolVersionFile } else { Join-Path $src $ToolVersionFile }
+    # O alloyctl v1.0.0 nao baixava o arquivo ao se atualizar: busca na mesma versao.
+    if ($toolMode -eq 'installed' -and -not (Test-Path -LiteralPath $versionFile -PathType Leaf)) {
+        try {
+            [IO.File]::WriteAllBytes($versionFile,
+                (Get-ToolHttp).GetByteArrayAsync("https://raw.githubusercontent.com/$ToolRepo/$($env:ALLOY_REF)/$ToolVersionFile").GetAwaiter().GetResult())
+        } catch {
+            Write-ToolWarn "nao foi possivel baixar $ToolVersionFile ($(Get-ToolErrorText $_.Exception))."
+        }
+    }
     $env:ALLOY_VERSION = Read-AlloyVersionFile $versionFile
     # Arquivos de cada operacao (baixados sob demanda, da mesma versao).
     $InstallerFiles = @('ops/install.ps1', 'ops/install/Shared.ps1', 'ops/install/Package.ps1', 'ops/install/Backup.ps1',
