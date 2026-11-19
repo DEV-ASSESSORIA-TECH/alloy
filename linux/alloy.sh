@@ -83,6 +83,8 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # ---------------------------------------------------------------- alloyctl
+# >>> funcoes do alloyctl: tests/linux/alloyctl.bats carrega deste marcador
+# ate o marcador de fim, sem executar o resto do script.
 TOOL_DIR=/opt/alloyctl
 TOOL_BIN=/usr/local/bin/alloyctl
 TOOL_REPO=DEV-ASSESSORIA-TECH/alloy
@@ -242,6 +244,7 @@ install_tool() {
 
 # Reexecuta a versao instalada, sem nova verificacao.
 exec_tool() { exec bash "$TOOL_DIR/alloy.sh" "${pass_args[@]}" --no-update; }
+# <<< funcoes do alloyctl
 
 self_dir=$(dirname -- "$self")
 if [[ $self_dir == "$TOOL_DIR" ]]; then

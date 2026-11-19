@@ -94,14 +94,17 @@ alloy/
 ├── windows/
 │   ├── alloy.ps1         # ponto de entrada (alloyctl)
 │   ├── lib/              # Common, State, Ui
-│   ├── ops/              # install.ps1, uninstall.ps1, setup-credentials.ps1
+│   ├── ops/              # install.ps1 (+ install/: pacote, backup e um arquivo por módulo),
+│   │                     # uninstall.ps1, setup-credentials.ps1
 │   ├── heartbeat/        # heartbeat.ps1 e heartbeat-setup.ps1
 │   ├── modules/          # config.alloy (servidor), desktop.alloy (estação), backup, hyperv,
 │   │                     # sqlanywhere, mysql, dbct (.alloy)
 │   ├── collectors/       # tarefas agendadas: hypervisor-inventory, sqlanywhere-collector, dbct-collector
 │   └── rmm/              # tactical-estacao.ps1 (Tactical RMM, sem perguntas)
 ├── docs/
-├── .github/workflows/    # ci.yml (validação) e release.yml (publicação por tag)
+├── tests/                # bats (linux/), Pester (windows/), caminhos e contratos do Grafana
+├── .github/              # ci.yml, release.yml e dependabot.yml (versão do Alloy)
+├── alloy.Dockerfile      # versão fixa do Alloy instalada pelo alloyctl
 └── CHANGELOG.md
 ```
 

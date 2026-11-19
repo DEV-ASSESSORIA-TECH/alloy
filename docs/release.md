@@ -41,6 +41,18 @@ A release é só a tag com as notas: nenhum pacote é anexado nem usado pelas
 máquinas. Os arquivos continuam vindo de
 `raw.githubusercontent.com/DEV-ASSESSORIA-TECH/alloy/vX.Y.Z/`.
 
+## Atualizar a versão do Alloy
+
+1. O Dependabot abre um PR mudando o `alloy.Dockerfile` (toda segunda-feira,
+   quando houver versão nova). A CI valida os `.alloy` com a imagem nova.
+2. Teste numa máquina de cada sistema com `alloyctl --ref <branch do PR>` e
+   **[3] Atualizar Alloy**.
+3. Merge e release PATCH (ou MINOR, se a versão do Alloy trouxer mudança de
+   comportamento), com a nota **"exige [3] Atualizar Alloy"**.
+4. As máquinas só mudam de versão quando alguém executa **[3] Atualizar
+   Alloy** (ou `alloyctl upgrade`). O diagnóstico marca as que ficaram para
+   trás.
+
 ## Voltar uma versão
 
 - **Rápido**: na página da release anterior, *Edit* → marque **Set as the

@@ -30,12 +30,26 @@ junto.
 - Arquivos organizados em subpastas por sistema: `lib/`, `ops/`,
   `heartbeat/`, `modules/` e, no Windows, `collectors/` e `rmm/`.
 - README dividido em `docs/`.
+- `install.ps1` dividido em `ops/install/` (pacote, backup e um arquivo por
+  módulo). `install.sh` e `install.ps1` usam as constantes de `lib/` em vez de
+  repeti-las; funções repetidas entre `install.ps1`, `heartbeat-setup.ps1` e
+  `State.ps1` foram para `Common.ps1`.
 - `rmm/tactical-estacao.ps1`: baixa do repositório novo e acompanha `stable`
   (`-Ref main` para testar). **O script cadastrado no Tactical RMM precisa ser
   recolado.**
 
 ### Adicionado
 
+- **Versão do Alloy fixada**: v1.19.2 (`alloy.Dockerfile`). Primeira
+  instalação e **[3] Atualizar Alloy** instalam essa versão; reaplicar nunca
+  muda a versão. No Linux o pacote fica retido (`apt-mark hold`). O
+  diagnóstico aponta Alloy instalado em versão diferente da fixada.
+- Dependabot para a versão do Alloy.
+- Testes de comportamento: bats (canais, troca do `alloyctl`, versão fixada,
+  downloads sob demanda) e Pester (partes do instalador, canais, `Common.ps1`).
+- Conferência dos produtores contra os contratos do repositório `grafana`
+  (jobs, métricas dos coletores, heartbeat, leitor de backups), em todo PR e
+  semanalmente.
 - CI: shellcheck, sintaxe Python, sintaxe e PSScriptAnalyzer no Windows
   PowerShell 5.1, `.ps1` só em ASCII, `alloy fmt` nos `.alloy` e conferência
   dos caminhos baixados pelo `alloyctl`.
