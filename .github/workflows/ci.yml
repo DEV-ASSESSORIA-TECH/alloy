@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux (shellcheck, Python, caminhos)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: shellcheck -x -P SCRIPTDIR linux/alloy.sh linux/lib/*.sh linux/ops/*.sh linux/heartbeat/*.sh
+      - name: Sintaxe Python
+        run: python3 -m py_compile linux/ops/setup-credentials.py linux/heartbeat/heartbeat.py
+      - name: Caminhos baixados pelo alloyctl
+        run: python3 tests/check_paths.py
+      - name: .ps1 somente ASCII (Windows PowerShell 5.1)
+        run: |
+          if LC_ALL=C grep -rlP '[^\x00-\x7F]' --include='*.ps1' windows; then
+            echo '::error::arquivos .ps1 com caracteres fora do ASCII (acima)'
+            exit 1
+          fi
+
+  windows:
+    name: Windows (PowerShell 5.1, PSScriptAnalyzer)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sintaxe no Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $failed = 0
+          Get-ChildItem -Path windows -Recurse -Filter *.ps1 | ForEach-Object {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            foreach ($e in $errors) {
+              Write-Host "::error file=$($_.FullName),line=$($e.Extent.StartLineNumber)::$($e.Message)"
+              $failed++
+            }
+          }
+          if ($failed) { exit 1 }
+      - name: PSScriptAnalyzer (erros)
+        shell: powershell
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          # ConvertTo-SecureString -AsPlainText: senha recebida por variavel de
+          # ambiente no Tactical RMM (setup-credentials.ps1), de proposito.
+          $results = Invoke-ScriptAnalyzer -Path windows -Recurse -Severity Error `
+            -ExcludeRule PSAvoidUsingConvertToSecureStringWithPlainText
+          $results | Format-Table -AutoSize | Out-String -Width 200 | Write-Host
+          if ($results) { exit 1 }
+
+  alloy:
+    name: Configuracoes .alloy (alloy fmt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: alloy fmt
+        run: |
+          status=0
+          for file in linux/modules/*.alloy windows/modules/*.alloy; do
+            if ! docker run --rm -v "$PWD:/w:ro" -w /w grafana/alloy:v1.11.2 fmt "$file" >/dev/null; then
+              echo "::error file=$file::alloy fmt falhou"
+              status=1
+            fi
+          done
+          exit $status

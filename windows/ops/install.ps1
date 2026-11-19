@@ -45,7 +45,7 @@ $Service = 'Alloy'
 # antivirus com analise de comportamento, como o Bitdefender ATC, tratam como
 # "script baixou e executou binario desconhecido"), conferido pelo SHA256SUMS
 # da release e pela assinatura da Grafana Labs antes de executar. A pasta fixa
-# permite exclusao por caminho no antivirus (README, secao Antivirus).
+# permite exclusao por caminho no antivirus (docs/antivirus.md).
 $InstallerDir = Join-Path $env:ProgramData 'AssessoriaTech\alloy-installer'
 $InstallerZipName = 'alloy-installer-windows-amd64.exe.zip'
 $InstallerExeName = 'alloy-installer-windows-amd64.exe'
@@ -169,7 +169,7 @@ function Get-AlloyEventSummary([datetime]$Since) {
 # Texto padrao quando o antivirus e o suspeito provavel.
 function Get-AntivirusHint {
     return "`nProvavel bloqueio do antivirus (ex.: Bitdefender Advanced Threat Control): verifique a quarentena e as exclusoes " +
-        "de $InstallerDir, $(Split-Path -Parent $Exe) e $Base (README, secao Antivirus)."
+        "de $InstallerDir, $(Split-Path -Parent $Exe) e $Base (docs/antivirus.md)."
 }
 
 # Baixa o instalador oficial para $InstallerDir e confere SHA256 (SHA256SUMS
@@ -329,10 +329,17 @@ function Sync-BackupTextfile {
     Set-PrivateDirectoryAcl $BackupTextfileDir $writers
 }
 
-# Arquivo do modulo: do clone local, ou baixado do mesmo ref do alloy.ps1
-# (ALLOY_REF; padrao: main).
+# Arquivo do modulo (modules\*.alloy) ou coletor (collectors\*.ps1): da pasta
+# do alloyctl/clone local, ou baixado da mesma versao do alloy.ps1 (ALLOY_REF;
+# padrao: main).
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+function Get-ModuleRelativePath([string]$Name) {
+    if ($Name -like '*.alloy') { return "modules/$Name" }
+    return "collectors/$Name"
+}
 function Copy-ModuleFile([string]$Name, [string]$Destination) {
-    $local = Join-Path $PSScriptRoot $Name
+    $relative = Get-ModuleRelativePath $Name
+    $local = Join-Path $RepoRoot ($relative -replace '/', '\')
     if (Test-Path -LiteralPath $local -PathType Leaf) {
         Copy-Item -LiteralPath $local -Destination $Destination
         return
@@ -341,9 +348,9 @@ function Copy-ModuleFile([string]$Name, [string]$Destination) {
     if ($ref -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]*$' -or $ref.Contains('..')) {
         throw "ALLOY_REF invalido: $ref"
     }
-    Log "Baixando $Name (ref $ref)..."
+    Log "Baixando $relative (ref $ref)..."
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    $raw = "https://raw.githubusercontent.com/DEV-ASSESSORIA-TECH/scripts/$ref/monitoring/alloy/windows/$Name"
+    $raw = "https://raw.githubusercontent.com/DEV-ASSESSORIA-TECH/alloy/$ref/windows/$relative"
     Invoke-WebRequest -Uri $raw -OutFile $Destination -UseBasicParsing -Headers @{ 'User-Agent' = 'AssessoriaTech-Alloy-Installer/1.0' }
     if (-not (Test-Path -LiteralPath $Destination) -or (Get-Item -LiteralPath $Destination).Length -eq 0) {
         throw "Download de $Name vazio."
@@ -689,7 +696,7 @@ function Test-MysqlConnection([hashtable]$Settings) {
         $result.logs += [ordered]@{ '__path__' = $slowLog; log_type = 'slow' }
         $result.notes += "Slow query log ligado (long_query_time = $($row[6]) s)."
     } elseif (-not $slowOn) {
-        $result.notes += 'Slow query log desligado: sem consultas lentas no Loki (veja o README, Modulo MySQL).'
+        $result.notes += 'Slow query log desligado: sem consultas lentas no Loki (veja docs/modulos.md, Modulo MySQL).'
     } else {
         $result.notes += "Slow query log gravado em tabela (log_output = $($row[5])): so arquivo e lido."
     }
@@ -710,7 +717,7 @@ function Read-MysqlSettings {
     } elseif ($clients.Count -gt 0) { $clients[0] } else { '' }
     Write-Host ''
     Write-Host '  Monitoramento do MySQL: informe o usuario de monitoramento (padrao alloy).'
-    Write-Host '  Ele so precisa do privilegio PROCESS; o README mostra como criar.'
+    Write-Host '  Ele so precisa do privilegio PROCESS; docs/modulos.md mostra como criar.'
     $settings = @{
         host = if ($current -and $current.host) { [string]$current.host } else { '127.0.0.1' }
         port = 0
@@ -1137,12 +1144,12 @@ if ($dbctEnabled) {
 # Pasta vazia nao publica nada; estacoes nao reportam backups.
 $backupEnabled = $Perfil -eq 'servidor'
 
-$Source = Join-Path $PSScriptRoot $BaseName
+$Source = Join-Path $RepoRoot "modules\$BaseName"
 if (-not (Test-Path -LiteralPath $Secret -PathType Leaf) -or (Get-Item -LiteralPath $Secret).Length -eq 0) {
     throw 'Credencial ausente. Execute alloy.ps1 (ou setup-credentials.ps1) primeiro.'
 }
 if (-not (Test-Path -LiteralPath $Source -PathType Leaf)) {
-    throw "$BaseName nao encontrado ao lado de install.ps1."
+    throw "$BaseName nao encontrado em modules\."
 }
 $stage = Join-Path $env:TEMP ('alloy-stage-' + [guid]::NewGuid().ToString('N'))
 Ensure-Directory $stage

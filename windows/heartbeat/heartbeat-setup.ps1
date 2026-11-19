@@ -20,9 +20,9 @@ fica no repositorio.
 param([string]$Url, [switch]$Test, [switch]$Remove, [switch]$Yes)
 
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'lib\Common.ps1')
-. (Join-Path $PSScriptRoot 'lib\Ui.ps1')
-. (Join-Path $PSScriptRoot 'lib\State.ps1')
+. (Join-Path $PSScriptRoot '..\lib\Common.ps1')
+. (Join-Path $PSScriptRoot '..\lib\Ui.ps1')
+. (Join-Path $PSScriptRoot '..\lib\State.ps1')
 
 # Estacoes sao descartaveis e nao alertam: heartbeat so nos servidores.
 # Testar e remover continuam permitidos (heartbeat de antes da troca de perfil).

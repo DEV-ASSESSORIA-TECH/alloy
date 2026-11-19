@@ -9,8 +9,8 @@
 param([switch]$Purge, [switch]$Yes)
 
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'lib\Common.ps1')
-. (Join-Path $PSScriptRoot 'lib\State.ps1')
+. (Join-Path $PSScriptRoot '..\lib\Common.ps1')
+. (Join-Path $PSScriptRoot '..\lib\State.ps1')
 
 function Find-AlloyUninstaller {
     $entry = Get-AlloyUninstallEntry

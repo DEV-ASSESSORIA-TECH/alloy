@@ -1,0 +1,53 @@
+name: Release
+
+# Envie uma tag vX.Y.Z a partir da main (docs/release.md). Tags com sufixo
+# (v1.2.0-rc.1) viram pre-release: nao entram no canal stable, mas podem ser
+# testadas com alloyctl --ref v1.2.0-rc.1.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag na main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main ||
+            { echo "::error::a tag $GITHUB_REF_NAME nao esta na main"; exit 1; }
+      - name: Notas do CHANGELOG
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          awk -v v="$version" '
+            index($0, "## [" v "]") == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found && /^\[[^]]+\]: / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md sem a secao ## [$version]"
+            exit 1
+          fi
+          cat notes.md
+      - name: Criar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=(--latest)
+          [[ $GITHUB_REF_NAME == *-* ]] && flags=(--prerelease --latest=false)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md "${flags[@]}"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md "${flags[@]}"
+          fi

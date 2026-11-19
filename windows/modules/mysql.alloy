@@ -20,7 +20,7 @@ local.file "mysql_config" {
 
 // Coletores fixos: o padrao do exportador inclui slave_status, que usa
 // SHOW REPLICA STATUS e falha no MySQL 5.5 a cada coleta. Requer so o
-// privilegio PROCESS (README, Modulo MySQL).
+// privilegio PROCESS (docs/modulos.md, Modulo MySQL).
 prometheus.exporter.mysql "mysql" {
   data_source_name = local.file.mysql_dsn.content
   set_collectors   = ["global_status", "global_variables", "info_schema.processlist"]

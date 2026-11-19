@@ -198,7 +198,8 @@ function Write-AlloyCtlRow([bool]$Full) {
     if (-not $Full -and $status.Length -gt 40) { $status = $status.Substring(0, 37) + '...' }
     switch ($env:ALLOYCTL_MODE) {
         'installed' {
-            $text = "$($env:ALLOYCTL_REF) @ $($env:ALLOY_REF.Substring(0, [Math]::Min(7, $env:ALLOY_REF.Length)))"
+            $shown = if ($env:ALLOY_REF -cmatch '^[0-9a-f]{40}$') { $env:ALLOY_REF.Substring(0, 7) } else { $env:ALLOY_REF }
+            $text = "$($env:ALLOYCTL_REF) @ $shown"
             if ($Full) { $text += " ($AlloyCtlDir)" }
             if ($status) { Write-UiRow 'alloyctl' 'warn' "$text - $status" } else { Write-UiRow 'alloyctl' 'ok' $text }
         }
@@ -472,7 +473,7 @@ function Show-MysqlDiagnostics {
         Write-UiRow $label $kind $path
     }
     if (-not @($logs | Where-Object { $_.log_type -eq 'slow' }).Count) {
-        Write-UiRow 'Slow log' 'none' 'desligado no MySQL (README, Modulo MySQL)'
+        Write-UiRow 'Slow log' 'none' 'desligado no MySQL (docs/modulos.md, Modulo MySQL)'
     }
     Write-UiRow 'Config' 'none' "$MysqlState (so SYSTEM e Administradores)"
 }

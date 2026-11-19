@@ -6,10 +6,10 @@
 set -euo pipefail
 
 dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=lib/common.sh
-source "$dir/lib/common.sh"
-# shellcheck source=lib/state.sh
-source "$dir/lib/state.sh"
+# shellcheck source=../lib/common.sh
+source "$dir/../lib/common.sh"
+# shellcheck source=../lib/state.sh
+source "$dir/../lib/state.sh"
 
 usage() {
   printf 'Uso: sudo bash uninstall.sh [--purge] [--yes]\n'

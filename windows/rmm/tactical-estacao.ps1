@@ -19,10 +19,12 @@ Idempotente: na primeira execucao grava a credencial (testada por OAuth2 +
 Loki antes de gravar) e instala; nas seguintes so reaplica a configuracao.
 Codigo de saida 0 = sucesso, 1 = falha (motivo na saida do script).
 
-Use -Ref para testar uma branch antes de ir para a main.
+Por padrao acompanha a ultima release (canal stable). Use -Ref main (ou
+outra branch) para testar antes de publicar uma release, ou -Ref v1.2.0 para
+fixar uma versao.
 #>
 param(
-    [string]$Ref = 'main'
+    [string]$Ref = 'stable'
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -49,7 +51,10 @@ try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $dir = Join-Path $env:TEMP ('alloy-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $dir | Out-Null
-    $url = "https://raw.githubusercontent.com/DEV-ASSESSORIA-TECH/scripts/$Ref/monitoring/alloy/windows/alloy.ps1"
+    # O ponto de entrada vem da main (ou da ref pedida); ele resolve o canal e
+    # instala o alloyctl da versao correspondente.
+    $entryRef = if ($Ref -eq 'stable') { 'main' } else { $Ref }
+    $url = "https://raw.githubusercontent.com/DEV-ASSESSORIA-TECH/alloy/$entryRef/windows/alloy.ps1"
     Invoke-WebRequest -Uri $url -OutFile (Join-Path $dir 'alloy.ps1') -UseBasicParsing
     # alloy.ps1 instala/atualiza o alloyctl e segue por ele; a credencial so e
     # pedida se ainda nao existir (setup-credentials.ps1 le ALLOY_PASSWORD).

@@ -14,12 +14,12 @@
 set -euo pipefail
 
 dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=lib/common.sh
-source "$dir/lib/common.sh"
-# shellcheck source=lib/ui.sh
-source "$dir/lib/ui.sh"
-# shellcheck source=lib/state.sh
-source "$dir/lib/state.sh"
+# shellcheck source=../lib/common.sh
+source "$dir/../lib/common.sh"
+# shellcheck source=../lib/ui.sh
+source "$dir/../lib/ui.sh"
+# shellcheck source=../lib/state.sh
+source "$dir/../lib/state.sh"
 
 action=setup
 url_arg=''
@@ -93,7 +93,7 @@ run_service() {
 # Kuma, que so o heartbeat usa, chega por LoadCredential (o arquivo sempre existe).
 write_units() {
   cat >"$HEARTBEAT_SERVICE_FILE" <<EOF
-# Gerenciado pelo heartbeat-setup.sh (scripts/monitoring/alloy). Nao editar.
+# Gerenciado pelo heartbeat-setup.sh (DEV-ASSESSORIA-TECH/alloy). Nao editar.
 [Unit]
 Description=Heartbeat do host: estado do Alloy no Loki e batida no Uptime Kuma
 After=network-online.target
@@ -114,7 +114,7 @@ NoNewPrivileges=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 EOF
   cat >"$HEARTBEAT_TIMER_FILE" <<EOF
-# Gerenciado pelo heartbeat-setup.sh (scripts/monitoring/alloy). Nao editar.
+# Gerenciado pelo heartbeat-setup.sh (DEV-ASSESSORIA-TECH/alloy). Nao editar.
 [Unit]
 Description=Heartbeat do host a cada minuto
 

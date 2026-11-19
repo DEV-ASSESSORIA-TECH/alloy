@@ -4,8 +4,9 @@
 #
 # Executado a partir do download (comando do README), instala o comando
 # alloyctl (/opt/alloyctl + /usr/local/bin/alloyctl) e segue por ele. O
-# alloyctl se atualiza a cada execucao pela branch acompanhada e baixa sob
-# demanda, presos ao mesmo commit, apenas os arquivos de cada operacao.
+# alloyctl se atualiza a cada execucao pelo canal acompanhado (padrao: a
+# ultima release) e baixa sob demanda, presos a mesma versao, apenas os
+# arquivos de cada operacao.
 set -euo pipefail
 
 usage() {
@@ -40,7 +41,8 @@ Comandos:
   menu         abre o menu mesmo na primeira execucao
 
 Opcoes globais:
-  --ref REF    branch, tag ou commit acompanhado pelo alloyctl (padrao: main);
+  --ref REF    canal acompanhado pelo alloyctl: stable (padrao, ultima
+               release), uma tag (v1.2.0, versao fixa), main ou outra branch;
                fica gravado para as proximas execucoes
   --no-update  nao atualiza o alloyctl antes de executar
   -h, --help   esta ajuda
@@ -83,21 +85,28 @@ fi
 # ---------------------------------------------------------------- alloyctl
 TOOL_DIR=/opt/alloyctl
 TOOL_BIN=/usr/local/bin/alloyctl
-TOOL_REPO=DEV-ASSESSORIA-TECH/scripts
+TOOL_REPO=DEV-ASSESSORIA-TECH/alloy
 TOOL_RAW=https://raw.githubusercontent.com/$TOOL_REPO
-TOOL_API=https://api.github.com/repos/$TOOL_REPO/commits
-TOOL_REMOTE_DIR=monitoring/alloy/linux
+TOOL_API=https://api.github.com/repos/$TOOL_REPO
+TOOL_WEB=https://github.com/$TOOL_REPO
+TOOL_REMOTE_DIR=linux
 TOOL_UA=AssessoriaTech-Alloy-Installer/1.0
+# Canal padrao: a ultima release publicada.
+TOOL_CHANNEL=stable
 # Nucleo baixado a cada versao; o resto vem sob demanda (fetch).
 TOOL_CORE=(alloy.sh lib/common.sh lib/state.sh lib/ui.sh)
 
 TOOL_LOG=/var/log/alloyctl.log
-TOOL_ERROR=''      # motivo da ultima falha (resolve_sha/install_tool)
-RESOLVED_SHA=''
+TOOL_ERROR=''      # motivo da ultima falha (resolve_version/install_tool)
+RESOLVED_VERSION=''
 
 tool_log() { printf '[alloyctl] %s\n' "$*"; }
 tool_warn() { printf '[alloyctl] AVISO: %s\n' "$*" >&2; }
 valid_ref() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && $1 != *..* ]]; }
+is_sha() { [[ $1 =~ ^[0-9a-f]{40}$ ]]; }
+is_tag() { [[ $1 =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; }
+# Versao para exibir: commit encurtado, tag inteira.
+short_version() { if is_sha "$1"; then printf '%s' "${1:0:7}"; else printf '%s' "${1:-?}"; fi; }
 
 # Historico de instalacoes, atualizacoes e falhas do alloyctl (limitado a
 # ~2000 linhas). Nunca interrompe a execucao.
@@ -113,37 +122,80 @@ tool_filelog() {
 # Primeira linha de erro do curl, sem o prefixo "curl: (N) ".
 curl_error() { sed -n '/./{s/^curl: ([0-9]*) //;p;q;}' "$1" 2>/dev/null; }
 
-# Commit atual de uma branch/tag em RESOLVED_SHA (uma requisicao a API do
-# GitHub). Em falha, o motivo fica em TOOL_ERROR. Sem subshell, para que as
-# variaveis cheguem a quem chamou.
-resolve_sha() {
-  local out code body errf
-  RESOLVED_SHA='' TOOL_ERROR=''
+# http_get URL [ACCEPT]: uma requisicao sem seguir redirecionamento. Preenche
+# HTTP_CODE, HTTP_BODY e HTTP_LOCATION; em falha de rede, TOOL_ERROR.
+HTTP_CODE='' HTTP_BODY='' HTTP_LOCATION=''
+http_get() {
+  local out errf headers=()
+  HTTP_CODE='' HTTP_BODY='' HTTP_LOCATION=''
+  [[ -n ${2:-} ]] && headers=(-H "Accept: $2")
   errf=$(mktemp)
-  if ! out=$(curl -sS --proto '=https' --connect-timeout 10 --max-time 20 -A "$TOOL_UA" \
-      -H 'Accept: application/vnd.github.sha' -w '\n%{http_code}' "$TOOL_API/$1" 2>"$errf"); then
+  if ! out=$(curl -sS --proto '=https' --connect-timeout 10 --max-time 20 -A "$TOOL_UA" "${headers[@]}" \
+      -w '\n%{http_code} %{redirect_url}' "$1" 2>"$errf"); then
     TOOL_ERROR="falha ao consultar o GitHub: $(curl_error "$errf")"
     rm -f -- "$errf"
     return 1
   fi
   rm -f -- "$errf"
-  code=${out##*$'\n'}
-  body=${out%$'\n'*}
-  case "$code" in
-    200) ;;
-    404|422) TOOL_ERROR="ref '$1' nao existe no repositorio (HTTP $code)"; return 1 ;;
-    403|429) TOOL_ERROR="GitHub recusou a consulta (HTTP $code): limite da API (60/h por IP) ou bloqueio de rede"; return 1 ;;
-    *) TOOL_ERROR="GitHub respondeu HTTP $code"; return 1 ;;
-  esac
-  [[ $body =~ ^[0-9a-f]{40}$ ]] || { TOOL_ERROR='resposta inesperada da API do GitHub'; return 1; }
-  RESOLVED_SHA=$body
+  HTTP_BODY=${out%$'\n'*}
+  out=${out##*$'\n'}
+  HTTP_CODE=${out%% *}
+  HTTP_LOCATION=${out#* }
 }
 
-# install_tool REF SHA: baixa o nucleo do commit, troca o diretorio inteiro
-# (descarta os arquivos sob demanda da versao anterior) e cria o comando.
-# O bash continua lendo o script em execucao pelo descritor ja aberto.
+# Ultima release: primeiro pelo redirecionamento de /releases/latest (pagina
+# do GitHub, fora do limite da API); se nao der, pela API (60/h por IP).
+resolve_latest() {
+  local tag
+  if http_get "$TOOL_WEB/releases/latest" && [[ $HTTP_CODE == 30[12] ]]; then
+    tag=${HTTP_LOCATION##*/releases/tag/}
+    if [[ $HTTP_LOCATION == */releases/tag/* ]] && is_tag "$tag"; then
+      RESOLVED_VERSION=$tag
+      return 0
+    fi
+    # Sem release, o GitHub redireciona para a lista de releases.
+    if [[ $HTTP_LOCATION == */releases ]]; then
+      TOOL_ERROR="nenhuma release publicada em $TOOL_REPO (use --ref main)"
+      return 1
+    fi
+  fi
+  TOOL_ERROR=''
+  http_get "$TOOL_API/releases/latest" 'application/vnd.github+json' || return 1
+  case "$HTTP_CODE" in
+    200) ;;
+    404) TOOL_ERROR="nenhuma release publicada em $TOOL_REPO (use --ref main)"; return 1 ;;
+    403|429) TOOL_ERROR="GitHub recusou a consulta (HTTP $HTTP_CODE): limite da API (60/h por IP) ou bloqueio de rede"; return 1 ;;
+    *) TOOL_ERROR="GitHub respondeu HTTP $HTTP_CODE"; return 1 ;;
+  esac
+  tag=$(printf '%s' "$HTTP_BODY" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+  is_tag "$tag" || { TOOL_ERROR='resposta inesperada da API do GitHub'; return 1; }
+  RESOLVED_VERSION=$tag
+}
+
+# resolve_version CANAL: versao a baixar em RESOLVED_VERSION. stable = ultima
+# release; tag vX.Y.Z = ela mesma (sem consulta; tags nao mudam); branch ou
+# commit = commit atual (uma requisicao a API). Em falha, motivo em
+# TOOL_ERROR. Sem subshell, para que as variaveis cheguem a quem chamou.
+resolve_version() {
+  RESOLVED_VERSION='' TOOL_ERROR=''
+  if [[ $1 == stable ]]; then resolve_latest; return; fi
+  if is_tag "$1"; then RESOLVED_VERSION=$1; return 0; fi
+  http_get "$TOOL_API/commits/$1" 'application/vnd.github.sha' || return 1
+  case "$HTTP_CODE" in
+    200) ;;
+    404|422) TOOL_ERROR="ref '$1' nao existe no repositorio (HTTP $HTTP_CODE)"; return 1 ;;
+    403|429) TOOL_ERROR="GitHub recusou a consulta (HTTP $HTTP_CODE): limite da API (60/h por IP) ou bloqueio de rede"; return 1 ;;
+    *) TOOL_ERROR="GitHub respondeu HTTP $HTTP_CODE"; return 1 ;;
+  esac
+  is_sha "$HTTP_BODY" || { TOOL_ERROR='resposta inesperada da API do GitHub'; return 1; }
+  RESOLVED_VERSION=$HTTP_BODY
+}
+
+# install_tool CANAL VERSAO: baixa o nucleo da versao, troca o diretorio
+# inteiro (descarta os arquivos sob demanda da versao anterior) e cria o
+# comando. O bash continua lendo o script em execucao pelo descritor ja aberto.
 install_tool() {
-  local ref=$1 sha=$2 stage old='' name args=() errf
+  local channel=$1 version=$2 stage old='' name args=() errf
   TOOL_ERROR=''
   if ! mkdir -p -- "$(dirname -- "$TOOL_DIR")" || ! stage=$(mktemp -d "$TOOL_DIR.new.XXXXXX" 2>/dev/null); then
     TOOL_ERROR="sem permissao para criar $TOOL_DIR"
@@ -151,11 +203,11 @@ install_tool() {
   fi
   for name in "${TOOL_CORE[@]}"; do
     mkdir -p -- "$stage/$(dirname -- "$name")"
-    args+=(-o "$stage/$name" "$TOOL_RAW/$sha/$TOOL_REMOTE_DIR/$name")
+    args+=(-o "$stage/$name" "$TOOL_RAW/$version/$TOOL_REMOTE_DIR/$name")
   done
   errf=$(mktemp)
   if ! curl -fsSL --proto '=https' --fail-early --connect-timeout 10 --retry 2 -A "$TOOL_UA" "${args[@]}" 2>"$errf"; then
-    TOOL_ERROR="falha ao baixar o alloyctl (${sha:0:7}): $(curl_error "$errf")"
+    TOOL_ERROR="falha ao baixar o alloyctl ($(short_version "$version")): $(curl_error "$errf")"
     rm -f -- "$errf"; rm -rf -- "$stage"; return 1
   fi
   rm -f -- "$errf"
@@ -163,11 +215,11 @@ install_tool() {
     [[ -s $stage/$name ]] || { TOOL_ERROR="download vazio: $name"; rm -rf -- "$stage"; return 1; }
   done
   if ! bash -n "$stage/alloy.sh" 2>/dev/null; then
-    TOOL_ERROR="alloy.sh de ${sha:0:7} com erro de sintaxe"
+    TOOL_ERROR="alloy.sh de $(short_version "$version") com erro de sintaxe"
     rm -rf -- "$stage"; return 1
   fi
-  printf '%s\n' "$ref" >"$stage/ref"
-  printf '%s\n' "$sha" >"$stage/version"
+  printf '%s\n' "$channel" >"$stage/channel"
+  printf '%s\n' "$version" >"$stage/version"
   chown -R root:root -- "$stage"
   find "$stage" -type d -exec chmod 0755 {} +
   find "$stage" -type f -exec chmod 0644 {} +
@@ -187,7 +239,7 @@ exec_tool() { exec bash "$TOOL_DIR/alloy.sh" "${pass_args[@]}" --no-update; }
 self_dir=$(dirname -- "$self")
 if [[ $self_dir == "$TOOL_DIR" ]]; then
   mode=installed
-elif [[ -f $self_dir/install.sh && -f $self_dir/lib/common.sh ]]; then
+elif [[ -f $self_dir/ops/install.sh && -f $self_dir/lib/common.sh ]]; then
   mode=local   # clone do repositorio: usa os arquivos locais
 else
   mode=bootstrap
@@ -199,14 +251,14 @@ fi
 case "$mode" in
   bootstrap)
     # Comando do README: instala (ou atualiza) o alloyctl e segue por ele.
-    ref=${ref_arg:-main}
+    ref=${ref_arg:-$TOOL_CHANNEL}
     first=true; [[ -x $TOOL_DIR/alloy.sh ]] && first=false
-    if resolve_sha "$ref" && install_tool "$ref" "$RESOLVED_SHA"; then
+    if resolve_version "$ref" && install_tool "$ref" "$RESOLVED_VERSION"; then
       if [[ $first == true ]]; then
-        tool_filelog "instalado: $ref @ ${RESOLVED_SHA:0:7}"
+        tool_filelog "instalado: $ref @ $(short_version "$RESOLVED_VERSION")"
         tool_log "comando instalado: $TOOL_BIN (acompanha $ref). Daqui em diante, use: alloyctl"
       else
-        tool_filelog "atualizado pelo comando do README: $ref @ ${RESOLVED_SHA:0:7}"
+        tool_filelog "atualizado pelo comando do README: $ref @ $(short_version "$RESOLVED_VERSION")"
       fi
       exec_tool
     fi
@@ -227,19 +279,22 @@ case "$mode" in
     export ALLOYCTL_STATUS="nao instalado: $TOOL_ERROR"
     ;;
   installed)
-    tracked=$(cat -- "$TOOL_DIR/ref" 2>/dev/null) || tracked=main
-    valid_ref "$tracked" || tracked=main
+    # Instalacao anterior a separacao do repositorio (arquivo "ref", sem
+    # "channel"): passa para o canal padrao.
+    tracked=$(cat -- "$TOOL_DIR/channel" 2>/dev/null) || tracked=$TOOL_CHANNEL
+    valid_ref "$tracked" || tracked=$TOOL_CHANNEL
     version=$(cat -- "$TOOL_DIR/version" 2>/dev/null) || version=''
-    # --ref diferente troca a branch acompanhada; so vale se a atualizacao der certo.
+    # --ref diferente troca o canal; so vale se a atualizacao der certo.
     wanted=$tracked force=false
     if [[ -n $ref_arg && $ref_arg != "$tracked" ]]; then wanted=$ref_arg; force=true; fi
+    if [[ ! -f $TOOL_DIR/channel ]]; then force=true; fi
     if [[ $no_update != true || $force == true ]]; then
-      if resolve_sha "$wanted"; then
-        sha=$RESOLVED_SHA
-        if [[ $sha != "$version" || $force == true ]]; then
-          if install_tool "$wanted" "$sha"; then
-            tool_filelog "atualizado: ${version:0:7} -> ${sha:0:7} ($wanted)"
-            tool_log "atualizado: ${version:0:7} -> ${sha:0:7} ($wanted)"
+      if resolve_version "$wanted"; then
+        new=$RESOLVED_VERSION
+        if [[ $new != "$version" || $force == true ]]; then
+          if install_tool "$wanted" "$new"; then
+            tool_filelog "atualizado: $(short_version "$version") -> $(short_version "$new") ($wanted)"
+            tool_log "atualizado: $(short_version "$version") -> $(short_version "$new") ($wanted)"
             exec_tool
           fi
         fi
@@ -247,7 +302,7 @@ case "$mode" in
       if [[ -n $TOOL_ERROR ]]; then
         # A versao instalada continua valendo; o motivo aparece no cabecalho.
         tool_filelog "sem atualizacao ($wanted): $TOOL_ERROR"
-        tool_warn "sem atualizacao ($TOOL_ERROR); usando $tracked @ ${version:0:7}. Log: $TOOL_LOG"
+        tool_warn "sem atualizacao ($TOOL_ERROR); usando $tracked @ $(short_version "$version"). Log: $TOOL_LOG"
         export ALLOYCTL_STATUS="sem atualizacao: $TOOL_ERROR"
       fi
     fi
@@ -256,15 +311,20 @@ esac
 
 case "$mode" in
   installed)
-    [[ $version =~ ^[0-9a-f]{40}$ ]] || { printf '[Alloy] ERRO: %s/version invalido; rode o comando do README.\n' "$TOOL_DIR" >&2; exit 1; }
-    # Tudo o que for baixado daqui em diante vem do mesmo commit.
+    { is_sha "$version" || is_tag "$version"; } ||
+      { printf '[Alloy] ERRO: %s/version invalido; rode o comando do README.\n' "$TOOL_DIR" >&2; exit 1; }
+    # Tudo o que for baixado daqui em diante vem da mesma versao.
     export ALLOY_REF=$version ALLOY_LOCAL=0 ALLOYCTL_REF=$tracked
     src=$TOOL_DIR ;;
   local)
     export ALLOY_REF=${ref_arg:-main} ALLOY_LOCAL=1
     src=$self_dir ;;
   bootstrap)
-    export ALLOY_REF=${ref_arg:-main} ALLOY_LOCAL=0
+    # Sem alloyctl: a versao resolvida, se houver; senao a ref pedida (stable
+    # nao e uma ref do git: cai para main).
+    ALLOY_REF=${RESOLVED_VERSION:-${ref_arg:-main}}
+    [[ $ALLOY_REF == stable ]] && ALLOY_REF=main
+    export ALLOY_REF ALLOY_LOCAL=0
     src=$(mktemp -d)
     trap 'rm -rf -- "$src"' EXIT
     mkdir -p -- "$src/lib"
@@ -290,19 +350,19 @@ command -v python3 >/dev/null || fail 'python3 ausente; instale antes de executa
 # processos proprios, com seus proprios controles de erro e rollback.
 
 run_credentials() {
-  fetch "$src" setup-credentials.py || return 1
-  python3 "$src/setup-credentials.py" "$@"
+  fetch "$src" ops/setup-credentials.py || return 1
+  python3 "$src/ops/setup-credentials.py" "$@"
 }
 
 run_installer() {
-  fetch "$src" install.sh config.alloy backup.alloy || return 1
-  bash "$src/install.sh" "$@"
+  fetch "$src" ops/install.sh modules/config.alloy modules/backup.alloy || return 1
+  bash "$src/ops/install.sh" "$@"
 }
 
 do_install() {
   if ! credential_present; then
     # Uma unica chamada de download para as duas etapas.
-    fetch "$src" setup-credentials.py install.sh config.alloy backup.alloy || return 1
+    fetch "$src" ops/setup-credentials.py ops/install.sh modules/config.alloy modules/backup.alloy || return 1
     ui_section 'ETAPA 1/2 - CREDENCIAL'
     run_credentials || return 1
     ui_section 'ETAPA 2/2 - INSTALACAO'
@@ -352,8 +412,8 @@ do_upgrade() {
 }
 
 do_uninstall() {
-  fetch "$src" uninstall.sh || return 1
-  bash "$src/uninstall.sh" "$@"
+  fetch "$src" ops/uninstall.sh || return 1
+  bash "$src/ops/uninstall.sh" "$@"
 }
 
 # A limpeza completa remove tambem o alloyctl: nada mais a executar.
@@ -369,7 +429,7 @@ do_update() {
     warn 'alloyctl nao instalado; execute sem --no-update a partir do comando do README.'
     return 1
   fi
-  ok "alloyctl $ALLOYCTL_REF @ ${ALLOY_REF:0:7} ($TOOL_BIN)"
+  ok "alloyctl $ALLOYCTL_REF @ $(short_version "$ALLOY_REF") ($TOOL_BIN)"
 }
 
 # Como abrir de novo: pelo alloyctl quando instalado.
@@ -383,8 +443,8 @@ reopen_hint() {
 
 # Heartbeat opcional: nunca sugerido na instalacao, so pelo menu [9] ou comando.
 do_heartbeat() {
-  fetch "$src" heartbeat-setup.sh heartbeat.py || return 1
-  bash "$src/heartbeat-setup.sh" "$@"
+  fetch "$src" heartbeat/heartbeat-setup.sh heartbeat/heartbeat.py || return 1
+  bash "$src/heartbeat/heartbeat-setup.sh" "$@"
 }
 
 # ---------------------------------------------------------------- interativo

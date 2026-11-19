@@ -9,9 +9,9 @@ servidor ja tiver credencial ou Alloy, menu interativo com o estado atual.
 
 Executado a partir do download (comando do README), instala o comando
 alloyctl (C:\Program Files\AssessoriaTech\alloyctl, no PATH da maquina) e
-segue por ele. O alloyctl se atualiza a cada execucao pela branch
-acompanhada e baixa sob demanda, presos ao mesmo commit, apenas os arquivos
-de cada operacao. Sem Administrador, pede elevacao (UAC) e abre em nova janela.
+segue por ele. O alloyctl se atualiza a cada execucao pelo canal
+acompanhado (padrao: a ultima release) e baixa sob demanda, presos a mesma
+versao, apenas os arquivos de cada operacao. Sem Administrador, pede elevacao (UAC) e abre em nova janela.
 
 Comandos:
   install      credencial (se ausente) + instalacao/reaplicacao
@@ -34,8 +34,9 @@ Comandos:
   help         esta ajuda
 
 .PARAMETER Ref
-Branch, tag ou commit acompanhado pelo alloyctl (padrao: main). Fica gravado
-para as proximas execucoes.
+Canal acompanhado pelo alloyctl: stable (padrao, ultima release), uma tag
+(v1.2.0, versao fixa), main ou outra branch. Fica gravado para as proximas
+execucoes.
 
 .PARAMETER Perfil
 servidor: job integrations/windows, com alertas. estacao: maquina descartavel,
@@ -138,8 +139,10 @@ if (-not $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrat
 # --------------------------------------------------------------- alloyctl
 $ToolDir = Join-Path $env:ProgramFiles 'AssessoriaTech\alloyctl'
 $ToolCmd = Join-Path $ToolDir 'alloyctl.cmd'
-$ToolRepo = 'DEV-ASSESSORIA-TECH/scripts'
-$ToolRemoteDir = 'monitoring/alloy/windows'
+$ToolRepo = 'DEV-ASSESSORIA-TECH/alloy'
+$ToolRemoteDir = 'windows'
+# Canal padrao: a ultima release publicada.
+$ToolChannel = 'stable'
 # Nucleo baixado a cada versao; o resto vem sob demanda (Save-RemoteFiles).
 $ToolCore = @('alloy.ps1', 'lib/Common.ps1', 'lib/State.ps1', 'lib/Ui.ps1')
 
@@ -181,10 +184,80 @@ function Get-ToolHttp {
     return $script:ToolHttp
 }
 
-# Commit atual de uma branch/tag (uma requisicao a API do GitHub). Em falha
-# devolve $null e deixa o motivo em $script:ToolError.
-function Resolve-ToolSha([string]$Value) {
+# Cliente sem seguir redirecionamento: le o destino de /releases/latest.
+function Get-ToolHttpNoRedirect {
+    if (-not $script:ToolHttpNoRedirect) {
+        [void](Get-ToolHttp)
+        $handler = [System.Net.Http.HttpClientHandler]::new()
+        $handler.AllowAutoRedirect = $false
+        $script:ToolHttpNoRedirect = [System.Net.Http.HttpClient]::new($handler)
+        $script:ToolHttpNoRedirect.Timeout = [TimeSpan]::FromSeconds(20)
+        $script:ToolHttpNoRedirect.DefaultRequestHeaders.UserAgent.ParseAdd('AssessoriaTech-Alloy-Installer/1.0')
+    }
+    return $script:ToolHttpNoRedirect
+}
+
+function Test-ToolSha([string]$Value) { $Value -cmatch '^[0-9a-f]{40}$' }
+function Test-ToolTag([string]$Value) { $Value -cmatch '^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$' }
+# Versao para exibir: commit encurtado, tag inteira.
+function Get-ToolShort([string]$Value) {
+    if (Test-ToolSha $Value) { return $Value.Substring(0, 7) }
+    if ($Value) { return $Value }
+    return '?'
+}
+
+function Get-ToolHttpErrorText([int]$Code, [string]$Value) {
+    switch ($Code) {
+        { $_ -in 404, 422 } { return "ref '$Value' nao existe no repositorio (HTTP $Code)" }
+        { $_ -in 403, 429 } { return "GitHub recusou a consulta (HTTP $Code): limite da API (60/h por IP) ou bloqueio de rede" }
+        default { return "GitHub respondeu HTTP $Code" }
+    }
+}
+
+# Ultima release: primeiro pelo redirecionamento de /releases/latest (pagina
+# do GitHub, fora do limite da API); se nao der, pela API (60/h por IP).
+function Resolve-ToolLatest {
+    $noRelease = "nenhuma release publicada em $ToolRepo (use -Ref main)"
+    try {
+        $response = (Get-ToolHttpNoRedirect).GetAsync("https://github.com/$ToolRepo/releases/latest").GetAwaiter().GetResult()
+        try {
+            $code = [int]$response.StatusCode
+            $location = if ($response.Headers.Location) { [string]$response.Headers.Location } else { '' }
+        } finally { $response.Dispose() }
+        if ($code -in 301, 302) {
+            if ($location -match '/releases/tag/([^/?#]+)$' -and (Test-ToolTag $Matches[1])) { return $Matches[1] }
+            # Sem release, o GitHub redireciona para a lista de releases.
+            if ($location -match '/releases/?$') { $script:ToolError = $noRelease; return $null }
+        }
+    } catch { }
+    try {
+        $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get,
+            "https://api.github.com/repos/$ToolRepo/releases/latest")
+        [void]$request.Headers.TryAddWithoutValidation('Accept', 'application/vnd.github+json')
+        $response = (Get-ToolHttp).SendAsync($request).GetAwaiter().GetResult()
+        try {
+            $code = [int]$response.StatusCode
+            if ($code -eq 404) { $script:ToolError = $noRelease; return $null }
+            if (-not $response.IsSuccessStatusCode) { $script:ToolError = Get-ToolHttpErrorText $code 'releases/latest'; return $null }
+            $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        } finally { $response.Dispose() }
+        $tag = [string](ConvertFrom-Json $body).tag_name
+        if (Test-ToolTag $tag) { return $tag }
+        $script:ToolError = 'resposta inesperada da API do GitHub'
+    } catch {
+        $script:ToolError = "falha ao consultar o GitHub: $(Get-ToolErrorText $_.Exception)"
+    }
+    return $null
+}
+
+# Versao a baixar para um canal: stable = ultima release; tag vX.Y.Z = ela
+# mesma (sem consulta; tags nao mudam); branch ou commit = commit atual (uma
+# requisicao a API do GitHub). Em falha devolve $null e deixa o motivo em
+# $script:ToolError.
+function Resolve-ToolVersion([string]$Value) {
     $script:ToolError = $null
+    if ($Value -eq 'stable') { return Resolve-ToolLatest }
+    if (Test-ToolTag $Value) { return $Value }
     try {
         # Get-ToolHttp primeiro: ele carrega System.Net.Http, que o Windows
         # PowerShell 5.1 nao carrega sozinho (sem isso o tipo abaixo nao existe).
@@ -196,16 +269,12 @@ function Resolve-ToolSha([string]$Value) {
         try {
             $code = [int]$response.StatusCode
             if (-not $response.IsSuccessStatusCode) {
-                $script:ToolError = switch ($code) {
-                    { $_ -in 404, 422 } { "ref '$Value' nao existe no repositorio (HTTP $code)" }
-                    { $_ -in 403, 429 } { "GitHub recusou a consulta (HTTP $code): limite da API (60/h por IP) ou bloqueio de rede" }
-                    default { "GitHub respondeu HTTP $code" }
-                }
+                $script:ToolError = Get-ToolHttpErrorText $code $Value
                 return $null
             }
             $sha = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult().Trim()
         } finally { $response.Dispose() }
-        if ($sha -cmatch '^[0-9a-f]{40}$') { return $sha }
+        if (Test-ToolSha $sha) { return $sha }
         $script:ToolError = 'resposta inesperada da API do GitHub'
     } catch {
         $script:ToolError = "falha ao consultar o GitHub: $(Get-ToolErrorText $_.Exception)"
@@ -271,11 +340,11 @@ function Add-ToolPath {
     return $null
 }
 
-# Baixa o nucleo do commit em um diretorio novo e troca o diretorio inteiro
+# Baixa o nucleo da versao em um diretorio novo e troca o diretorio inteiro
 # (descarta os arquivos sob demanda da versao anterior). O PowerShell ja leu
 # o script em execucao: renomear a pasta nao o afeta.
 # O PATH e tratado na execucao seguinte (modo instalado), nunca aqui.
-function Install-Tool([string]$TrackedRef, [string]$Sha) {
+function Install-Tool([string]$Channel, [string]$Version) {
     $script:ToolError = $null
     $stage = $ToolDir + '.new-' + [guid]::NewGuid().ToString('N')
     $old = $null
@@ -286,7 +355,7 @@ function Install-Tool([string]$TrackedRef, [string]$Sha) {
             $target = Join-Path $stage ($name -replace '/', '\')
             $dir = Split-Path -Parent $target
             if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-            $bytes = (Get-ToolHttp).GetByteArrayAsync("https://raw.githubusercontent.com/$ToolRepo/$Sha/$ToolRemoteDir/$name").GetAwaiter().GetResult()
+            $bytes = (Get-ToolHttp).GetByteArrayAsync("https://raw.githubusercontent.com/$ToolRepo/$Version/$ToolRemoteDir/$name").GetAwaiter().GetResult()
             if ($bytes.Length -eq 0) { throw "Download vazio: $name" }
             [IO.File]::WriteAllBytes($target, $bytes)
             $tokens = $null
@@ -294,8 +363,8 @@ function Install-Tool([string]$TrackedRef, [string]$Sha) {
             [void][Management.Automation.Language.Parser]::ParseFile($target, [ref]$tokens, [ref]$errors)
             if ($errors -and $errors.Count -gt 0) { throw "$name com erro de sintaxe: $($errors[0].Message)" }
         }
-        [IO.File]::WriteAllText((Join-Path $stage 'ref'), $TrackedRef + "`r`n")
-        [IO.File]::WriteAllText((Join-Path $stage 'version'), $Sha + "`r`n")
+        [IO.File]::WriteAllText((Join-Path $stage 'channel'), $Channel + "`r`n")
+        [IO.File]::WriteAllText((Join-Path $stage 'version'), $Version + "`r`n")
         # "& exit /b" na mesma linha: o cmd nao rele o .cmd depois do PowerShell
         # (o arquivo pode ter sido trocado ou removido nesse meio tempo).
         $shim = "@echo off`r`nrem alloyctl: Grafana Alloy (gerado pelo alloy.ps1; atualizado a cada versao).`r`n" +
@@ -330,22 +399,22 @@ if ($Ref -and -not (Test-ToolRef $Ref)) { throw "Referencia invalida: $Ref" }
 $toolMode = 'bootstrap'
 if ($PSScriptRoot -and ($PSScriptRoot.TrimEnd('\') -ieq $ToolDir)) {
     $toolMode = 'installed'
-} elseif ($PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'install.ps1')) -and
+} elseif ($PSScriptRoot -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'ops\install.ps1')) -and
           (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'lib\Common.ps1'))) {
     $toolMode = 'local'   # clone do repositorio: usa os arquivos locais
 }
 
 if ($toolMode -eq 'bootstrap') {
     # Comando do README: instala (ou atualiza) o alloyctl e segue por ele.
-    $tracked = if ($Ref) { $Ref } else { 'main' }
+    $tracked = if ($Ref) { $Ref } else { $ToolChannel }
     $first = -not (Test-Path -LiteralPath (Join-Path $ToolDir 'alloy.ps1'))
-    $sha = Resolve-ToolSha $tracked
-    if ($sha -and (Install-Tool $tracked $sha)) {
+    $resolved = Resolve-ToolVersion $tracked
+    if ($resolved -and (Install-Tool $tracked $resolved)) {
         if ($first) {
-            Write-ToolFileLog "instalado: $tracked @ $($sha.Substring(0, 7))"
+            Write-ToolFileLog "instalado: $tracked @ $(Get-ToolShort $resolved)"
             Write-ToolLog "alloyctl instalado em $ToolDir (acompanha $tracked)."
         } else {
-            Write-ToolFileLog "atualizado pelo comando do README: $tracked @ $($sha.Substring(0, 7))"
+            Write-ToolFileLog "atualizado pelo comando do README: $tracked @ $(Get-ToolShort $resolved)"
         }
         Invoke-Tool
         return
@@ -369,22 +438,26 @@ if ($toolMode -eq 'bootstrap') {
     }
     $env:ALLOYCTL_STATUS = "nao instalado: $script:ToolError"
 } elseif ($toolMode -eq 'installed') {
-    $tracked = 'main'
-    try { $tracked = ([IO.File]::ReadAllText((Join-Path $ToolDir 'ref'))).Trim() } catch { }
-    if (-not (Test-ToolRef $tracked)) { $tracked = 'main' }
+    # Instalacao anterior a separacao do repositorio (arquivo "ref", sem
+    # "channel"): passa para o canal padrao.
+    $channelFile = Join-Path $ToolDir 'channel'
+    $legacy = -not (Test-Path -LiteralPath $channelFile -PathType Leaf)
+    $tracked = $ToolChannel
+    try { $tracked = ([IO.File]::ReadAllText($channelFile)).Trim() } catch { }
+    if (-not (Test-ToolRef $tracked)) { $tracked = $ToolChannel }
     $version = ''
     try { $version = ([IO.File]::ReadAllText((Join-Path $ToolDir 'version'))).Trim() } catch { }
-    # -Ref diferente troca a branch acompanhada; so vale se a atualizacao der certo.
-    $short = $version.Substring(0, [Math]::Min(7, $version.Length))
+    # -Ref diferente troca o canal; so vale se a atualizacao der certo.
+    $short = Get-ToolShort $version
     $wanted = $tracked
-    $force = $false
+    $force = $legacy
     if ($Ref -and $Ref -ne $tracked) { $wanted = $Ref; $force = $true }
     if (-not $NoUpdate -or $force) {
-        $sha = Resolve-ToolSha $wanted
-        if ($sha -and ($sha -ne $version -or $force)) {
-            if (Install-Tool $wanted $sha) {
-                Write-ToolFileLog "atualizado: $short -> $($sha.Substring(0, 7)) ($wanted)"
-                Write-ToolLog "atualizado: $short -> $($sha.Substring(0, 7)) ($wanted)"
+        $resolved = Resolve-ToolVersion $wanted
+        if ($resolved -and ($resolved -ne $version -or $force)) {
+            if (Install-Tool $wanted $resolved) {
+                Write-ToolFileLog "atualizado: $short -> $(Get-ToolShort $resolved) ($wanted)"
+                Write-ToolLog "atualizado: $short -> $(Get-ToolShort $resolved) ($wanted)"
                 Invoke-Tool
                 return
             }
@@ -396,7 +469,7 @@ if ($toolMode -eq 'bootstrap') {
             $env:ALLOYCTL_STATUS = "sem atualizacao: $script:ToolError"
         }
     }
-    if ($version -cnotmatch '^[0-9a-f]{40}$') { throw "$ToolDir\version invalido; rode o comando do README." }
+    if (-not ((Test-ToolSha $version) -or (Test-ToolTag $version))) { throw "$ToolDir\version invalido; rode o comando do README." }
 
     # PATH conferido a cada execucao (rapido quando ja esta): cobre a primeira
     # instalacao, uma pasta removida do PATH e uma recusa anterior do registro.
@@ -415,7 +488,7 @@ if ($toolMode -eq 'bootstrap') {
 $workDir = $null
 switch ($toolMode) {
     'installed' {
-        # Tudo o que for baixado daqui em diante vem do mesmo commit.
+        # Tudo o que for baixado daqui em diante vem da mesma versao.
         $env:ALLOY_REF = $version
         $env:ALLOYCTL_REF = $tracked
         $script:LocalMode = $false
@@ -427,7 +500,9 @@ switch ($toolMode) {
         $src = $PSScriptRoot
     }
     default {
-        $env:ALLOY_REF = if ($Ref) { $Ref } else { 'main' }
+        # Sem alloyctl: a versao resolvida, se houver; senao a ref pedida
+        # (stable nao e uma ref do git: cai para main).
+        $env:ALLOY_REF = if ($resolved) { $resolved } elseif ($Ref -and $Ref -ne 'stable') { $Ref } else { 'main' }
         $script:LocalMode = $false
         $workDir = Join-Path $env:TEMP ('alloy-cli-' + [guid]::NewGuid().ToString('N'))
         $src = $workDir
@@ -463,19 +538,19 @@ try {
     function Test-Estacao { (Get-AlloyPerfil) -eq 'estacao' }
 
     function Invoke-Credentials([hashtable]$Arguments = @{}) {
-        Save-RemoteFiles $src @('setup-credentials.ps1')
-        & (Join-Path $src 'setup-credentials.ps1') @Arguments
+        Save-RemoteFiles $src @('ops/setup-credentials.ps1')
+        & (Join-Path $src 'ops\setup-credentials.ps1') @Arguments
     }
 
     function Invoke-Installer([hashtable]$Arguments = @{}) {
-        Save-RemoteFiles $src @('install.ps1', 'config.alloy', 'desktop.alloy')
-        & (Join-Path $src 'install.ps1') @Arguments
+        Save-RemoteFiles $src @('ops/install.ps1', 'modules/config.alloy', 'modules/desktop.alloy')
+        & (Join-Path $src 'ops\install.ps1') @Arguments
     }
 
     function Invoke-Install([hashtable]$Arguments = @{}) {
         if (-not (Test-CredentialPresent)) {
             # Os tres arquivos com o mesmo cliente HTTP, antes da etapa 1.
-            Save-RemoteFiles $src @('setup-credentials.ps1', 'install.ps1', 'config.alloy', 'desktop.alloy')
+            Save-RemoteFiles $src @('ops/setup-credentials.ps1', 'ops/install.ps1', 'modules/config.alloy', 'modules/desktop.alloy')
             Write-UiSection 'ETAPA 1/2 - CREDENCIAL'
             Invoke-Credentials @{ Perfil = (Resolve-Perfil $Arguments.Perfil) }
             Write-UiSection 'ETAPA 2/2 - INSTALACAO'
@@ -549,8 +624,8 @@ try {
     }
 
     function Invoke-Uninstall([hashtable]$Arguments = @{}) {
-        Save-RemoteFiles $src @('uninstall.ps1')
-        & (Join-Path $src 'uninstall.ps1') @Arguments
+        Save-RemoteFiles $src @('ops/uninstall.ps1')
+        & (Join-Path $src 'ops\uninstall.ps1') @Arguments
     }
 
     # A limpeza completa remove tambem o alloyctl: nada mais a executar.
@@ -562,7 +637,7 @@ try {
         if ($toolMode -ne 'installed') {
             throw 'alloyctl nao instalado; execute o comando do README (sem -NoUpdate) para instalar.'
         }
-        Write-Ok "alloyctl $tracked @ $($version.Substring(0, 7)) ($ToolCmd)"
+        Write-Ok "alloyctl $tracked @ $(Get-ToolShort $version) ($ToolCmd)"
     }
 
     function Get-ReopenHint {
@@ -572,8 +647,8 @@ try {
 
     # Heartbeat opcional: nunca sugerido na instalacao, so pelo menu [9] ou comando.
     function Invoke-Heartbeat([hashtable]$Arguments = @{}) {
-        Save-RemoteFiles $src @('heartbeat-setup.ps1', 'heartbeat.ps1')
-        & (Join-Path $src 'heartbeat-setup.ps1') @Arguments
+        Save-RemoteFiles $src @('heartbeat/heartbeat-setup.ps1', 'heartbeat/heartbeat.ps1')
+        & (Join-Path $src 'heartbeat\heartbeat-setup.ps1') @Arguments
     }
 
     # ------------------------------------------------------------- interativo

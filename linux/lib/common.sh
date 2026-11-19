@@ -3,8 +3,8 @@
 # Funcoes compartilhadas por alloy.sh e uninstall.sh: constantes, saida,
 # confirmacoes e download dos arquivos do repositorio.
 
-ALLOY_REPO_RAW=${ALLOY_REPO_RAW:-https://raw.githubusercontent.com/DEV-ASSESSORIA-TECH/scripts}
-ALLOY_REMOTE_DIR=monitoring/alloy/linux
+ALLOY_REPO_RAW=${ALLOY_REPO_RAW:-https://raw.githubusercontent.com/DEV-ASSESSORIA-TECH/alloy}
+ALLOY_REMOTE_DIR=linux
 ALLOY_REF=${ALLOY_REF:-main}
 # 1 quando executado a partir de um clone: nada e baixado.
 ALLOY_LOCAL=${ALLOY_LOCAL:-0}

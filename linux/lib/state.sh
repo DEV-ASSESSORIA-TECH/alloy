@@ -90,6 +90,7 @@ alloyctl_row() {
   case "${ALLOYCTL_MODE:-}" in
     installed)
       text="${ALLOYCTL_REF:-?} @ ${ALLOY_REF:0:7}"
+      [[ $ALLOY_REF =~ ^[0-9a-f]{40}$ ]] || text="${ALLOYCTL_REF:-?} @ $ALLOY_REF"
       [[ $1 == full ]] && text+=" ($ALLOYCTL_BIN)"
       if [[ -n $status ]]; then ui_row alloyctl warn "$text - $status"; else ui_row alloyctl ok "$text"; fi ;;
     local) ui_row alloyctl none "clone local (ref $ALLOY_REF)" ;;

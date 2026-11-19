@@ -2,8 +2,8 @@
 # Constantes, saida, confirmacoes e download via raw.
 # Manter os .ps1 em ASCII: o Windows PowerShell 5.1 le arquivos sem BOM como ANSI.
 
-$RepoRaw     = 'https://raw.githubusercontent.com/DEV-ASSESSORIA-TECH/scripts'
-$RemoteDir   = 'monitoring/alloy/windows'
+$RepoRaw     = 'https://raw.githubusercontent.com/DEV-ASSESSORIA-TECH/alloy'
+$RemoteDir   = 'windows'
 $Base        = Join-Path $env:ProgramData 'GrafanaLabs\Alloy'
 $Secret      = Join-Path $Base 'oauth-client-secret'
 $ConfigDir   = Join-Path $Base 'config'

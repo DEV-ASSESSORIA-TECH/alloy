@@ -1,0 +1,47 @@
+# Changelog
+
+Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
+versões em [SemVer](https://semver.org/lang/pt-BR/). Veja
+[docs/release.md](docs/release.md) para o processo de publicação.
+
+Cada item diz se a mudança exige **[1] Reaplicar configuração** nas máquinas:
+a atualização automática troca só o `alloyctl`, nunca a configuração do Alloy.
+
+## [Não publicado]
+
+## [1.0.0] - 2026-11-19
+
+Primeira versão no repositório próprio. Até aqui o código ficava em
+`DEV-ASSESSORIA-TECH/scripts` (`monitoring/alloy`), cujo histórico foi trazido
+junto.
+
+### Alterado
+
+- Repositório próprio: `DEV-ASSESSORIA-TECH/alloy`. O comando de instalação
+  mudou (README). O endereço antigo continua funcionando por um período e
+  migra a máquina sozinho ([docs/migracao.md](docs/migracao.md)).
+- O `alloyctl` acompanha um **canal**: `stable` (padrão, última release),
+  uma tag (`v1.0.0`, versão fixa) ou uma branch (`main`). Antes acompanhava a
+  branch `main`. Instalações antigas passam para `stable` na primeira
+  execução.
+- A última release é descoberta sem usar a API do GitHub (redirecionamento de
+  `/releases/latest`), com a API como alternativa. Fora do limite de 60
+  consultas por hora por IP.
+- Arquivos organizados em subpastas por sistema: `lib/`, `ops/`,
+  `heartbeat/`, `modules/` e, no Windows, `collectors/` e `rmm/`.
+- README dividido em `docs/`.
+- `rmm/tactical-estacao.ps1`: baixa do repositório novo e acompanha `stable`
+  (`-Ref main` para testar). **O script cadastrado no Tactical RMM precisa ser
+  recolado.**
+
+### Adicionado
+
+- CI: shellcheck, sintaxe Python, sintaxe e PSScriptAnalyzer no Windows
+  PowerShell 5.1, `.ps1` só em ASCII, `alloy fmt` nos `.alloy` e conferência
+  dos caminhos baixados pelo `alloyctl`.
+- Release automática ao enviar uma tag `vX.Y.Z`, com as notas deste arquivo.
+
+Não exige **[1] Reaplicar**: a configuração gerada é a mesma.
+
+[Não publicado]: https://github.com/DEV-ASSESSORIA-TECH/alloy/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/DEV-ASSESSORIA-TECH/alloy/releases/tag/v1.0.0

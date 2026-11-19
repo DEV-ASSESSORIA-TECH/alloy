@@ -41,11 +41,13 @@ command -v python3 >/dev/null || fail 'python3 ausente; instale antes de executa
 command -v cmp >/dev/null || fail 'cmp ausente; instale coreutils/diffutils.'
 
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
+# Arquivos .alloy em ../modules (mesma estrutura do repositorio).
+modules_dir=$script_dir/../modules
 # Mesmos valores de lib/common.sh (install.sh roda sem a lib).
 TEXTFILE_DIR=/var/lib/alloy-textfile
 BACKUP_TEXTFILE_DIR=$TEXTFILE_DIR/backup
 BACKUP_GROUP=alloy-backup
-[[ -s "$script_dir/config.alloy" ]] || fail 'config.alloy ausente ao lado de install.sh.'
+[[ -s "$modules_dir/config.alloy" ]] || fail 'config.alloy ausente em modules/.'
 
 docker_ready() {
   command -v docker >/dev/null 2>&1 &&
@@ -76,30 +78,26 @@ esac
 
 stage=$(mktemp -d)
 trap 'rm -rf -- "$stage"' EXIT
-cp -- "$script_dir/config.alloy" "$stage/config.alloy"
-# Leitura dos backups: sempre instalada (pasta vazia nao publica nada).
-if [[ -s "$script_dir/backup.alloy" ]]; then
-  cp -- "$script_dir/backup.alloy" "$stage/backup.alloy"
-else
+# module_file NOME: copia modules/NOME para o stage; ausente, baixa do mesmo
+# repositorio e referencia do alloy.sh (ALLOY_REF).
+module_file() {
+  local name=$1 ref
+  if [[ -s "$modules_dir/$name" ]]; then
+    cp -- "$modules_dir/$name" "$stage/$name"
+    return
+  fi
   ref=${ALLOY_REF:-main}
   [[ $ref =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && $ref != *..* ]] || fail "ALLOY_REF invalido: $ref"
-  log "Baixando backup.alloy (ref $ref)..."
-  curl -fsSL --proto '=https' -o "$stage/backup.alloy" \
-    "https://raw.githubusercontent.com/DEV-ASSESSORIA-TECH/scripts/$ref/monitoring/alloy/linux/backup.alloy"
-  [[ -s "$stage/backup.alloy" ]] || fail 'Download backup.alloy vazio.'
-fi
+  log "Baixando $name (ref $ref)..."
+  curl -fsSL --proto '=https' -o "$stage/$name" \
+    "https://raw.githubusercontent.com/DEV-ASSESSORIA-TECH/alloy/$ref/linux/modules/$name"
+  [[ -s "$stage/$name" ]] || fail "Download $name vazio."
+}
+module_file config.alloy
+# Leitura dos backups: sempre instalada (pasta vazia nao publica nada).
+module_file backup.alloy
 if [[ $use_docker == true ]]; then
-  if [[ -s "$script_dir/docker.alloy" ]]; then
-    cp -- "$script_dir/docker.alloy" "$stage/docker.alloy"
-  else
-    # Mesma origem e referencia do alloy.sh (ALLOY_REF; padrao: main).
-    ref=${ALLOY_REF:-main}
-    [[ $ref =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && $ref != *..* ]] || fail "ALLOY_REF invalido: $ref"
-    log "Baixando docker.alloy (ref $ref)..."
-    curl -fsSL --proto '=https' -o "$stage/docker.alloy" \
-      "https://raw.githubusercontent.com/DEV-ASSESSORIA-TECH/scripts/$ref/monitoring/alloy/linux/docker.alloy"
-    [[ -s "$stage/docker.alloy" ]] || fail 'Download docker.alloy vazio.'
-  fi
+  module_file docker.alloy
 fi
 
 # Preservar modulos locais adicionais durante a validacao.
