@@ -53,6 +53,32 @@ ok() { printf '[Alloy] %s%s%s\n' "$C_OK" "$*" "$C_RESET"; }
 warn() { printf '[Alloy] %sAVISO:%s %s\n' "$C_WARN" "$C_RESET" "$*" >&2; }
 fail() { printf '[Alloy] %sERRO:%s %s\n' "$C_ERR" "$C_RESET" "$*" >&2; exit 1; }
 
+# Versao do Alloy fixada nesta versao do alloyctl. Fonte unica: o
+# alloy.Dockerfile na raiz do repositorio ("FROM grafana/alloy:vX.Y.Z"), no
+# formato que o Dependabot atualiza. O alloy.sh le o arquivo e repassa a versao
+# em ALLOY_VERSION para os scripts filhos.
+read_alloy_version() {
+  local version
+  [[ -f $1 ]] || { printf 'Arquivo de versao do Alloy ausente: %s\n' "$1" >&2; return 1; }
+  version=$(grep -m 1 -E '^[[:space:]]*FROM[[:space:]]+grafana/alloy:v[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$' "$1" |
+    sed -E 's/.*:v([0-9.]+).*/\1/') || true
+  [[ -n $version ]] || { printf 'Versao do Alloy nao encontrada em %s (esperado: FROM grafana/alloy:vX.Y.Z).\n' "$1" >&2; return 1; }
+  printf '%s\n' "$version"
+}
+
+# Versao repassada pelo alloy.sh; erro se ausente ou invalida.
+pinned_alloy_version() {
+  [[ ${ALLOY_VERSION:-} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+    { warn "Versao do Alloy ausente ou invalida (ALLOY_VERSION='${ALLOY_VERSION:-}'). Execute pelo alloyctl."; return 1; }
+  printf '%s\n' "$ALLOY_VERSION"
+}
+
+# apt_package_version VERSAO: le "apt-cache madison alloy" na entrada e devolve
+# a versao do pacote que corresponde a VERSAO (ex.: 1.19.2 ou 1.19.2-1).
+apt_package_version() {
+  awk -F'|' -v want="$1" '{ gsub(/[[:space:]]/, "", $2) } $2 == want || index($2, want "-") == 1 { print $2; exit }'
+}
+
 # confirm "Pergunta" [S|N]: retorna 0 para sim. O segundo argumento e o padrao.
 confirm() {
   local default=${2:-S} hint='[S/n]' answer

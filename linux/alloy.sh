@@ -95,6 +95,8 @@ TOOL_UA=AssessoriaTech-Alloy-Installer/1.0
 TOOL_CHANNEL=stable
 # Nucleo baixado a cada versao; o resto vem sob demanda (fetch).
 TOOL_CORE=(alloy.sh lib/common.sh lib/state.sh lib/ui.sh)
+# Versao do Alloy fixada (raiz do repositorio; formato que o Dependabot atualiza).
+TOOL_VERSION_FILE=alloy.Dockerfile
 
 TOOL_LOG=/var/log/alloyctl.log
 TOOL_ERROR=''      # motivo da ultima falha (resolve_version/install_tool)
@@ -205,15 +207,20 @@ install_tool() {
     mkdir -p -- "$stage/$(dirname -- "$name")"
     args+=(-o "$stage/$name" "$TOOL_RAW/$version/$TOOL_REMOTE_DIR/$name")
   done
+  args+=(-o "$stage/$TOOL_VERSION_FILE" "$TOOL_RAW/$version/$TOOL_VERSION_FILE")
   errf=$(mktemp)
   if ! curl -fsSL --proto '=https' --fail-early --connect-timeout 10 --retry 2 -A "$TOOL_UA" "${args[@]}" 2>"$errf"; then
     TOOL_ERROR="falha ao baixar o alloyctl ($(short_version "$version")): $(curl_error "$errf")"
     rm -f -- "$errf"; rm -rf -- "$stage"; return 1
   fi
   rm -f -- "$errf"
-  for name in "${TOOL_CORE[@]}"; do
+  for name in "${TOOL_CORE[@]}" "$TOOL_VERSION_FILE"; do
     [[ -s $stage/$name ]] || { TOOL_ERROR="download vazio: $name"; rm -rf -- "$stage"; return 1; }
   done
+  if ! grep -qE '^[[:space:]]*FROM[[:space:]]+grafana/alloy:v[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$' "$stage/$TOOL_VERSION_FILE"; then
+    TOOL_ERROR="$TOOL_VERSION_FILE de $(short_version "$version") sem a versao do Alloy"
+    rm -rf -- "$stage"; return 1
+  fi
   if ! bash -n "$stage/alloy.sh" 2>/dev/null; then
     TOOL_ERROR="alloy.sh de $(short_version "$version") com erro de sintaxe"
     rm -rf -- "$stage"; return 1
@@ -331,7 +338,8 @@ case "$mode" in
     curl -fsSL --proto '=https' --fail-early --connect-timeout 10 --retry 2 \
       -o "$src/lib/common.sh" "$TOOL_RAW/$ALLOY_REF/$TOOL_REMOTE_DIR/lib/common.sh" \
       -o "$src/lib/state.sh" "$TOOL_RAW/$ALLOY_REF/$TOOL_REMOTE_DIR/lib/state.sh" \
-      -o "$src/lib/ui.sh" "$TOOL_RAW/$ALLOY_REF/$TOOL_REMOTE_DIR/lib/ui.sh" ||
+      -o "$src/lib/ui.sh" "$TOOL_RAW/$ALLOY_REF/$TOOL_REMOTE_DIR/lib/ui.sh" \
+      -o "$src/$TOOL_VERSION_FILE" "$TOOL_RAW/$ALLOY_REF/$TOOL_VERSION_FILE" ||
       { printf '[Alloy] ERRO: falha ao baixar as bibliotecas (ref %s).\n' "$ALLOY_REF" >&2; exit 1; } ;;
 esac
 export ALLOYCTL_MODE=$mode
@@ -341,6 +349,12 @@ source "$src/lib/common.sh"
 source "$src/lib/ui.sh"
 # shellcheck source=lib/state.sh
 source "$src/lib/state.sh"
+
+# Versao do Alloy fixada nesta versao do alloyctl: a pasta do alloyctl e a
+# temporaria guardam o arquivo ao lado do alloy.sh; o clone, na raiz.
+if [[ $mode == local ]]; then version_file=$src/../$TOOL_VERSION_FILE; else version_file=$src/$TOOL_VERSION_FILE; fi
+ALLOY_VERSION=$(read_alloy_version "$version_file") || fail 'Versao do Alloy indisponivel; rode o comando do README.'
+export ALLOY_VERSION
 
 command -v apt-get >/dev/null || fail 'APT obrigatorio (Debian/Ubuntu).'
 command -v python3 >/dev/null || fail 'python3 ausente; instale antes de executar.'

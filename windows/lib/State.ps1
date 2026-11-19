@@ -78,8 +78,7 @@ function Get-AlloyVersion {
     $stamp = (Get-Item -LiteralPath $Exe).LastWriteTimeUtc.Ticks
     if ($script:AlloyVersionStamp -eq $stamp) { return $script:AlloyVersion }
     $version = $null
-    $entry = Get-AlloyUninstallEntry
-    if ($entry -and $entry.DisplayVersion) { $version = [string]$entry.DisplayVersion }
+    $version = Get-InstalledAlloyVersion
     if (-not $version) {
         try {
             $line = & $Exe --version 2>$null | Select-Object -First 1
@@ -92,22 +91,10 @@ function Get-AlloyVersion {
     return $script:AlloyVersion
 }
 
-# HttpClient sem proxy e reaproveitado: o Invoke-WebRequest do 5.1 tenta
-# descobrir proxy (WPAD) e pode levar segundos mesmo para 127.0.0.1.
-function Get-ReadyClient {
-    if (-not $script:ReadyClient) {
-        Add-Type -AssemblyName System.Net.Http
-        $handler = [System.Net.Http.HttpClientHandler]::new()
-        $handler.UseProxy = $false
-        $script:ReadyClient = [System.Net.Http.HttpClient]::new($handler)
-        $script:ReadyClient.Timeout = [TimeSpan]::FromSeconds(2)
-    }
-    return $script:ReadyClient
-}
 function Test-AlloyReady {
     Invoke-UiMemo 'ready' {
         try {
-            $resp = (Get-ReadyClient).GetAsync($ReadyUrl).GetAwaiter().GetResult()
+            $resp = (Get-LocalHttp).GetAsync($ReadyUrl).GetAwaiter().GetResult()
             try { [int]$resp.StatusCode -eq 200 } finally { $resp.Dispose() }
         } catch { $false }
     }
@@ -446,7 +433,7 @@ function Show-MysqlDiagnostics {
         Write-UiRow 'Senha' 'err' 'ausente: use Reconfigurar MySQL'
     }
     $text = $null
-    try { $text = (Get-ReadyClient).GetStringAsync($MysqlMetricsUrl).GetAwaiter().GetResult() } catch { }
+    try { $text = (Get-LocalHttp).GetStringAsync($MysqlMetricsUrl).GetAwaiter().GetResult() } catch { }
     if (-not $text) {
         Write-UiRow 'Conexao' 'err' 'exportador sem resposta (Alloy parado ou modulo nao carregado)'
     } elseif ($text -match '(?m)^mysql_up 1') {
@@ -510,7 +497,12 @@ function Show-AlloyDiagnostics {
     $svc = Get-AlloyService
     if (Test-AlloyInstalled) {
         Write-UiRow 'Estado' $status.Kind "$($status.Text) ($($svc.StartType))"
-        Write-UiRow 'Versao' 'none' (Get-AlloyVersion)
+        $installedVersion = Get-AlloyVersion
+        if ($env:ALLOY_VERSION -and $installedVersion -ne ('v' + $env:ALLOY_VERSION)) {
+            Write-UiRow 'Versao' 'warn' "$installedVersion (fixada: v$($env:ALLOY_VERSION); use [3] Atualizar Alloy)"
+        } else {
+            Write-UiRow 'Versao' 'none' $installedVersion
+        }
         if ($status.Kind -ne 'err') {
             try {
                 $processId = (Get-CimInstance -ClassName Win32_Service -Filter "Name='$ServiceName'" -ErrorAction Stop).ProcessId

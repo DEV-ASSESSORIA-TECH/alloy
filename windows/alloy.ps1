@@ -98,7 +98,7 @@ if (-not $Ref -and $env:ALLOY_REF) { $Ref = $env:ALLOY_REF }
 # as variaveis abaixo sao restauradas no final para nao vazar para a sessao
 # (um ALLOY_REF com o commit faria a proxima execucao acompanhar o commit fixo).
 $SavedEnv = @{}
-foreach ($name in @('ALLOY_REF', 'ALLOYCTL_MODE', 'ALLOYCTL_REF', 'ALLOYCTL_STATUS')) {
+foreach ($name in @('ALLOY_REF', 'ALLOY_VERSION', 'ALLOYCTL_MODE', 'ALLOYCTL_REF', 'ALLOYCTL_STATUS')) {
     $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 $env:ALLOYCTL_STATUS = $null
@@ -145,6 +145,8 @@ $ToolRemoteDir = 'windows'
 $ToolChannel = 'stable'
 # Nucleo baixado a cada versao; o resto vem sob demanda (Save-RemoteFiles).
 $ToolCore = @('alloy.ps1', 'lib/Common.ps1', 'lib/State.ps1', 'lib/Ui.ps1')
+# Versao do Alloy fixada (raiz do repositorio; formato que o Dependabot atualiza).
+$ToolVersionFile = 'alloy.Dockerfile'
 
 function Write-ToolLog([string]$Text) { Write-Host "[alloyctl] $Text" }
 function Write-ToolWarn([string]$Text) { Write-Host "[alloyctl] AVISO: $Text" -ForegroundColor Yellow }
@@ -363,6 +365,11 @@ function Install-Tool([string]$Channel, [string]$Version) {
             [void][Management.Automation.Language.Parser]::ParseFile($target, [ref]$tokens, [ref]$errors)
             if ($errors -and $errors.Count -gt 0) { throw "$name com erro de sintaxe: $($errors[0].Message)" }
         }
+        $bytes = (Get-ToolHttp).GetByteArrayAsync("https://raw.githubusercontent.com/$ToolRepo/$Version/$ToolVersionFile").GetAwaiter().GetResult()
+        if ([Text.Encoding]::ASCII.GetString($bytes) -notmatch '(?m)^\s*FROM\s+grafana/alloy:v[0-9]+\.[0-9]+\.[0-9]+\s*$') {
+            throw "$ToolVersionFile sem a versao do Alloy"
+        }
+        [IO.File]::WriteAllBytes((Join-Path $stage $ToolVersionFile), $bytes)
         [IO.File]::WriteAllText((Join-Path $stage 'channel'), $Channel + "`r`n")
         [IO.File]::WriteAllText((Join-Path $stage 'version'), $Version + "`r`n")
         # "& exit /b" na mesma linha: o cmd nao rele o .cmd depois do PowerShell
@@ -517,6 +524,8 @@ try {
         try {
             Invoke-WebRequest -UseBasicParsing -OutFile (Join-Path $workDir 'lib\Common.ps1') `
                 -Uri "https://raw.githubusercontent.com/$ToolRepo/$($env:ALLOY_REF)/$ToolRemoteDir/lib/Common.ps1"
+            Invoke-WebRequest -UseBasicParsing -OutFile (Join-Path $workDir $ToolVersionFile) `
+                -Uri "https://raw.githubusercontent.com/$ToolRepo/$($env:ALLOY_REF)/$ToolVersionFile"
         } catch {
             throw "Falha ao baixar as bibliotecas (ref $($env:ALLOY_REF)): $($_.Exception.Message)"
         }
@@ -525,6 +534,14 @@ try {
     Save-RemoteFiles $src @('lib/State.ps1', 'lib/Ui.ps1')
     . (Join-Path $src 'lib\Ui.ps1')
     . (Join-Path $src 'lib\State.ps1')
+    # Versao do Alloy fixada nesta versao do alloyctl: a pasta do alloyctl e a
+    # temporaria guardam o arquivo ao lado do alloy.ps1; o clone, na raiz.
+    $versionFile = if ($toolMode -eq 'local') { Join-Path (Split-Path -Parent $PSScriptRoot) $ToolVersionFile } else { Join-Path $src $ToolVersionFile }
+    $env:ALLOY_VERSION = Read-AlloyVersionFile $versionFile
+    # Arquivos de cada operacao (baixados sob demanda, da mesma versao).
+    $InstallerFiles = @('ops/install.ps1', 'ops/install/Shared.ps1', 'ops/install/Package.ps1', 'ops/install/Backup.ps1',
+        'ops/install/HyperV.ps1', 'ops/install/SqlAnywhere.ps1', 'ops/install/Mysql.ps1', 'ops/install/Dbct.ps1',
+        'modules/config.alloy', 'modules/desktop.alloy')
 
     # -------------------------------------------------------------- operacoes
     # Os scripts filhos rodam com seus proprios controles de erro e rollback;
@@ -543,14 +560,14 @@ try {
     }
 
     function Invoke-Installer([hashtable]$Arguments = @{}) {
-        Save-RemoteFiles $src @('ops/install.ps1', 'modules/config.alloy', 'modules/desktop.alloy')
+        Save-RemoteFiles $src $InstallerFiles
         & (Join-Path $src 'ops\install.ps1') @Arguments
     }
 
     function Invoke-Install([hashtable]$Arguments = @{}) {
         if (-not (Test-CredentialPresent)) {
-            # Os tres arquivos com o mesmo cliente HTTP, antes da etapa 1.
-            Save-RemoteFiles $src @('ops/setup-credentials.ps1', 'ops/install.ps1', 'modules/config.alloy', 'modules/desktop.alloy')
+            # Credencial e instalacao com o mesmo cliente HTTP, antes da etapa 1.
+            Save-RemoteFiles $src (@('ops/setup-credentials.ps1') + $InstallerFiles)
             Write-UiSection 'ETAPA 1/2 - CREDENCIAL'
             Invoke-Credentials @{ Perfil = (Resolve-Perfil $Arguments.Perfil) }
             Write-UiSection 'ETAPA 2/2 - INSTALACAO'
