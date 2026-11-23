@@ -10,15 +10,20 @@ a atualização automática troca só o `alloyctl`, nunca a configuração do Al
 ## [Não publicado]
 
 Proposta: **v1.1.0**. Não exige **[1] Reaplicar**. **[3] Atualizar Alloy**
-leva cada máquina para a v1.19.2 do Alloy (as instaladas antes seguem na
+leva cada máquina para a v1.21.3 do Alloy (as instaladas antes seguem na
 versão que já têm até alguém executar).
 
 ### Adicionado
 
-- **Versão do Alloy fixada**: v1.19.2 (`alloy.Dockerfile`). Primeira
+- **Versão do Alloy fixada**: v1.21.3 (`alloy.Dockerfile`). Primeira
   instalação e **[3] Atualizar Alloy** instalam essa versão; reaplicar nunca
   muda a versão. No Linux o pacote fica retido (`apt-mark hold`). O
   diagnóstico aponta Alloy instalado em versão diferente da fixada.
+  **[3] Atualizar Alloy** nunca rebaixa: um Alloy mais novo que o fixado é
+  mantido, com aviso.
+- Linux: `install.sh`, `uninstall.sh` e `heartbeat-setup.sh` mostram o
+  comando, a linha e o código quando algo falha (antes, com `set -e`, paravam
+  só com "A operacao nao foi concluida").
 - Dependabot para a versão do Alloy.
 - Testes de comportamento: bats (canais, troca do `alloyctl`, versão fixada,
   downloads sob demanda) e Pester (partes do instalador, canais, `Common.ps1`).

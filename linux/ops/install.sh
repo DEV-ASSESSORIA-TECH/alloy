@@ -4,6 +4,7 @@ set -euo pipefail
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 # shellcheck source=../lib/common.sh
 source "$script_dir/../lib/common.sh"
+trap_errors
 
 # O servico pode ainda nao estar carregado durante a primeira instalacao.
 # So tentar limpar falhas quando a unidade realmente estiver em estado failed.
@@ -144,15 +145,19 @@ else
   printf 'deb [signed-by=%s] https://apt.grafana.com stable main\n' "$APT_KEY" > "$APT_SOURCE"
   apt-get update
 
-  package_version=$(apt-cache madison alloy | apt_package_version "$pinned_version")
+  madison=$(apt-cache madison alloy) || fail 'apt-cache madison alloy falhou.'
+  package_version=$(apt_package_version "$pinned_version" <<<"$madison")
   [[ -n $package_version ]] || fail "Alloy $pinned_version nao encontrado no repositorio APT da Grafana."
   apt-mark unhold alloy >/dev/null 2>&1 || true
   if [[ $alloy_installed == true ]]; then
     before_version=$(dpkg-query -W -f='${Version}' alloy)
     if [[ $before_version == "$package_version" ]]; then
       log "Alloy ja esta na versao fixada: $before_version."
+    elif dpkg --compare-versions "$before_version" gt "$package_version"; then
+      # Atualizar nunca rebaixa: versao mais nova instalada a mao fica.
+      warn "Alloy $before_version e mais novo que a versao fixada ($package_version); mantido."
     else
-      apt-get install -y --allow-downgrades "alloy=$package_version"
+      apt-get install -y "alloy=$package_version"
       alloy_changed=true
       log "Alloy: $before_version -> $package_version (versao fixada nesta versao do alloyctl)."
     fi

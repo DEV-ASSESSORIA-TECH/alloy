@@ -297,8 +297,13 @@ try {
         Install-AlloyPackage
     } elseif ($Upgrade) {
         $pinnedVersion = Get-AlloyPinnedVersion
+        $installedParsed = $null
         if ($installedVersion -eq $pinnedVersion) {
             Write-Log "Alloy ja esta na versao fixada ($pinnedVersion)."
+        } elseif ([version]::TryParse(($installedVersion -replace '[-+].*$', ''), [ref]$installedParsed) -and
+                  $installedParsed -gt [version]$pinnedVersion) {
+            # Atualizar nunca rebaixa: versao mais nova instalada a mao fica.
+            Write-Warning "Alloy $installedVersion e mais novo que a versao fixada ($pinnedVersion); mantido."
         } else {
             Write-Log "Alloy $(if ($installedVersion) { $installedVersion } else { '?' }) -> $pinnedVersion (versao fixada nesta versao do alloyctl)."
             Install-AlloyPackage

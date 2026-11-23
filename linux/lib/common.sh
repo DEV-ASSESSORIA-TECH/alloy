@@ -74,9 +74,21 @@ pinned_alloy_version() {
 }
 
 # apt_package_version VERSAO: le "apt-cache madison alloy" na entrada e devolve
-# a versao do pacote que corresponde a VERSAO (ex.: 1.19.2 ou 1.19.2-1).
+# a versao do pacote que corresponde a VERSAO (ex.: 1.21.3 ou 1.21.3-1).
+# Le a entrada ate o fim: sair na primeira linha (exit) fecha o pipe, e quem
+# escreve (apt-cache) morre com SIGPIPE; com pipefail + set -e, o script para
+# sem mensagem (gawk sai na hora; mawk le tudo, por isso so falha com gawk).
 apt_package_version() {
-  awk -F'|' -v want="$1" '{ gsub(/[[:space:]]/, "", $2) } $2 == want || index($2, want "-") == 1 { print $2; exit }'
+  awk -F'|' -v want="$1" '
+    { gsub(/[[:space:]]/, "", $2) }
+    !found && ($2 == want || index($2, want "-") == 1) { print $2; found = 1 }'
+}
+
+# trap_errors: com set -e, um comando que falha encerra o script sem dizer
+# qual foi. Mostra o comando, a linha e o codigo antes de sair.
+trap_errors() {
+  set -E
+  trap 'printf "[Alloy] ERRO: comando falhou (codigo %s, %s linha %s): %s\n" "$?" "$(basename -- "${BASH_SOURCE[0]:-$0}")" "$LINENO" "$BASH_COMMAND" >&2' ERR
 }
 
 # confirm "Pergunta" [S|N]: retorna 0 para sim. O segundo argumento e o padrao.

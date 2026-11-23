@@ -16,6 +16,7 @@ set -euo pipefail
 dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=../lib/common.sh
 source "$dir/../lib/common.sh"
+trap_errors
 # shellcheck source=../lib/ui.sh
 source "$dir/../lib/ui.sh"
 # shellcheck source=../lib/state.sh

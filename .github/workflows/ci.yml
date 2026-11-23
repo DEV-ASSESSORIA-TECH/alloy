@@ -26,7 +26,8 @@ jobs:
         run: python3 tests/check_paths.py
       - name: Testes (bats)
         run: |
-          sudo apt-get install -y -q bats
+          # gawk: o awk que sai na hora (o teste de SIGPIPE precisa dele).
+          sudo apt-get install -y -q bats gawk
           bats tests/linux
       - name: .ps1 somente ASCII (Windows PowerShell 5.1)
         run: |

@@ -63,8 +63,9 @@ Cada versão do `alloyctl` instala **uma versão fixa do Alloy**, definida em
 
 - **Primeira instalação**: instala a versão fixada.
 - **Reaplicar configuração**: nunca muda a versão de um Alloy já instalado.
-- **[3] Atualizar Alloy** (`upgrade`): leva o Alloy para a versão fixada,
-  inclusive para baixo, se alguém tiver atualizado na mão.
+- **[3] Atualizar Alloy** (`upgrade`): leva o Alloy para a versão fixada.
+  Nunca rebaixa: se o instalado for mais novo (atualizado na mão), fica, com
+  aviso.
 - **Linux**: o pacote fica retido (`apt-mark hold alloy`) para um
   `apt upgrade` do sistema não trocar a versão. A desinstalação libera o
   pacote antes de remover.

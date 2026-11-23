@@ -50,3 +50,26 @@ setup() {
   grep -qx 'https://raw.githubusercontent.com/DEV-ASSESSORIA-TECH/alloy/v1.0.0/linux/modules/config.alloy' "$BATS_TEST_TMPDIR/args"
   ! grep -q 'ops/install.sh' "$BATS_TEST_TMPDIR/args"
 }
+
+@test "apt_package_version le a entrada inteira (quem escreve nao recebe SIGPIPE)" {
+  # Com gawk, sair na primeira linha mata o apt-cache com SIGPIPE; com
+  # pipefail + set -e o install.sh parava sem mensagem.
+  for impl in awk gawk mawk; do
+    command -v "$impl" >/dev/null || continue
+    run bash -c "set -euo pipefail; source '$REPO_ROOT/linux/lib/common.sh'
+      awk() { command $impl \"\$@\"; }
+      v=\$(perl -e '\$|=1; for \$m (reverse 0..22) { for \$p (3,2,1,0) { print \"     alloy | 1.\$m.\$p-1 | x\\n\"; select(undef,undef,undef,0.002) } }' | apt_package_version 1.19.2)
+      echo \"\$v\""
+    [ "$status" -eq 0 ]
+    [ "$output" = 1.19.2-1 ]
+  done
+}
+
+@test "trap_errors mostra o comando que falhou com set -e" {
+  run bash -c "set -euo pipefail; source '$REPO_ROOT/linux/lib/common.sh'; trap_errors
+    x=\$(false)
+    echo nao-chega"
+  [ "$status" -ne 0 ]
+  [[ $output == *'ERRO: comando falhou'* ]]
+  [[ $output != *nao-chega* ]]
+}
