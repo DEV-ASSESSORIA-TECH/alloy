@@ -6,4 +6,4 @@
 # mesma imagem. Nao e usado para construir imagem nenhuma.
 #
 # Mantenha uma unica linha FROM, no formato grafana/alloy:vX.Y.Z.
-FROM grafana/alloy:v1.21.3
+FROM grafana/alloy:v1.22.0
