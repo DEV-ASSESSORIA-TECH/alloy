@@ -45,7 +45,7 @@ grafana_repo_user() {
   local names installed
   names=$(sed -n 's/^Package: //p' /var/lib/apt/lists/apt.grafana.com_*_Packages 2>/dev/null | sort -u || true)
   [[ -n $names ]] || names=$'grafana\ngrafana-enterprise\ngrafana-agent\ngrafana-agent-flow\nloki\npromtail\nmimir\ntempo\npyroscope\nk6'
-  installed=$(dpkg-query -W -f='${Package}\t${db:Status-Abbrev}\n' 2>/dev/null | awk '$2 ~ /^ii/ {print $1}' | sort -u)
+  installed=$(dpkg-query -W -f='${Package}\t${db:Status-Abbrev}\n' 2>/dev/null | awk '$2 ~ /^[ih]i/ {print $1}' | sort -u)
   comm -12 <(grep -vx alloy <<<"$names" | sort -u) <(printf '%s\n' "$installed") | head -n 1
 }
 

@@ -73,3 +73,19 @@ setup() {
   [[ $output == *'ERRO: comando falhou'* ]]
   [[ $output != *nao-chega* ]]
 }
+
+@test "package_installed aceita pacote retido (apt-mark hold)" {
+  # Com hold, ${Status} vira "hold ok installed"; o menu mostrava "nao instalado".
+  dpkg-query() {
+    case "$*" in
+      *'${db:Status-Status}'*held*) printf installed ;;
+      *'${db:Status-Status}'*normal*) printf installed ;;
+      *'${db:Status-Status}'*removido*) printf config-files ;;
+      *) return 1 ;;
+    esac
+  }
+  package_installed held
+  package_installed normal
+  ! package_installed removido
+  ! package_installed ausente
+}

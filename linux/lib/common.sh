@@ -84,6 +84,13 @@ apt_package_version() {
     !found && ($2 == want || index($2, want "-") == 1) { print $2; found = 1 }'
 }
 
+# package_installed PACOTE: instalado, retido (apt-mark hold) ou nao. O campo
+# Status vira "hold ok installed" com o pacote retido; db:Status-Status diz so
+# "installed", com ou sem hold.
+package_installed() {
+  [[ $(dpkg-query -W -f='${db:Status-Status}' "$1" 2>/dev/null || true) == installed ]]
+}
+
 # trap_errors: com set -e, um comando que falha encerra o script sem dizer
 # qual foi. Mostra o comando, a linha e o codigo antes de sair.
 trap_errors() {

@@ -112,7 +112,7 @@ shopt -u nullglob
 # hold) para um "apt upgrade" do sistema nao trocar a versao.
 pinned_version=$(pinned_alloy_version) || exit 1
 alloy_installed=false
-if [[ $(dpkg-query -W -f='${Status}' alloy 2>/dev/null || true) == 'install ok installed' ]]; then
+if package_installed alloy; then
   alloy_installed=true
 fi
 alloy_changed=false
@@ -128,7 +128,7 @@ else
   # Instalar somente pacotes ausentes; --upgrade muda apenas o Alloy.
   missing_packages=()
   for pkg in ca-certificates curl python3; do
-    if [[ $(dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null || true) != 'install ok installed' ]]; then
+    if ! package_installed "$pkg"; then
       missing_packages+=("$pkg")
     fi
   done

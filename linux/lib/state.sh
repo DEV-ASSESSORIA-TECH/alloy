@@ -9,7 +9,7 @@ host_name() {
 }
 
 alloy_installed() {
-  [[ $(dpkg-query -W -f='${Status}' alloy 2>/dev/null || true) == 'install ok installed' ]]
+  package_installed alloy
 }
 alloy_version() { dpkg-query -W -f='${Version}' alloy 2>/dev/null || true; }
 service_active() { systemctl is-active --quiet alloy 2>/dev/null; }
