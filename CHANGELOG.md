@@ -9,43 +9,50 @@ a atualização automática troca só o `alloyctl`, nunca a configuração do Al
 
 ## [Não publicado]
 
-Proposta: **v1.1.0**. Não exige **[1] Reaplicar**. **[3] Atualizar Alloy**
-leva cada máquina para a v1.21.3 do Alloy (as instaladas antes seguem na
-versão que já têm até alguém executar).
+## [1.1.0] - 2026-11-23
+
+Não exige **[1] Reaplicar**. A versão do Alloy só muda numa máquina quando
+alguém executar **[3] Atualizar Alloy** (leva à v1.21.3; quem já está nela
+ou acima não muda).
 
 ### Adicionado
 
-- **Versão do Alloy fixada**: v1.21.3 (`alloy.Dockerfile`). Primeira
-  instalação e **[3] Atualizar Alloy** instalam essa versão; reaplicar nunca
-  muda a versão. No Linux o pacote fica retido (`apt-mark hold`). O
-  diagnóstico aponta Alloy instalado em versão diferente da fixada.
-  **[3] Atualizar Alloy** nunca rebaixa: um Alloy mais novo que o fixado é
-  mantido, com aviso.
-- Windows: aberto a partir do PowerShell 7 (inclusive pelo `alloyctl` digitado
-  no pwsh), o `alloyctl` falhava ao carregar `Set-Acl`. Agora tira do
-  `PSModulePath` as pastas do PowerShell 7 e, se o próprio `alloy.ps1` rodar
-  no pwsh, reabre no Windows PowerShell 5.1 no mesmo console.
-- Linux: o pacote retido (`hold ok installed`) é reconhecido como instalado
-  (o diagnóstico mostrava "nao instalado" e o Reaplicar ia ao APT).
-- Linux: `install.sh`, `uninstall.sh` e `heartbeat-setup.sh` mostram o
-  comando, a linha e o código quando algo falha (antes, com `set -e`, paravam
-  só com "A operacao nao foi concluida").
-- Dependabot para a versão do Alloy.
+- **Versão do Alloy fixada**: v1.21.3, definida em `alloy.Dockerfile`. A
+  primeira instalação e **[3] Atualizar Alloy** instalam essa versão;
+  reaplicar nunca muda a versão. **[3] Atualizar Alloy** nunca rebaixa: um
+  Alloy mais novo que o fixado é mantido, com aviso. O diagnóstico aponta
+  Alloy instalado em versão diferente da fixada.
+  - Linux: instala `alloy=<versão>` pelo APT e retém o pacote
+    (`apt-mark hold`), para um `apt upgrade` não trocar a versão.
+  - Windows: baixa o instalador da release da Grafana com essa versão
+    (SHA256 e assinatura conferidos como antes).
+- Dependabot para a versão do Alloy (PR quando sair versão nova).
 - Testes de comportamento: bats (canais, troca do `alloyctl`, versão fixada,
-  downloads sob demanda) e Pester (partes do instalador, canais, `Common.ps1`).
+  downloads sob demanda, leitura do APT com `awk`/`gawk`/`mawk`) e Pester
+  (partes do instalador, canais, `Common.ps1`, `PSModulePath`).
 - Conferência dos produtores contra os contratos do repositório `grafana`
   (jobs, métricas dos coletores, heartbeat, leitor de backups), em todo PR e
   semanalmente.
-- CI também nos branches de trabalho (`claude/**`).
 
 ### Alterado
 
 - `install.ps1` dividido em `ops/install/` (pacote, backup e um arquivo por
-  módulo). `install.sh` e `install.ps1` usam as constantes de `lib/` em vez de
-  repeti-las; funções repetidas entre `install.ps1`, `heartbeat-setup.ps1` e
-  `State.ps1` foram para `Common.ps1`.
+  módulo). `install.sh` e `install.ps1` usam as constantes de `lib/` em vez
+  de repeti-las; funções repetidas entre `install.ps1`, `heartbeat-setup.ps1`
+  e `State.ps1` foram para `Common.ps1`.
+- Linux: `install.sh`, `uninstall.sh` e `heartbeat-setup.sh` mostram o
+  comando, a linha e o código quando algo falha (antes, com `set -e`,
+  paravam só com "A operacao nao foi concluida").
 - Um `alloyctl` v1.0.0 que se atualiza para esta versão baixa o
   `alloy.Dockerfile` na primeira execução (a v1.0.0 não o conhecia).
+- CI também nos branches de trabalho (`claude/**`).
+
+### Corrigido
+
+- Windows: aberto a partir do PowerShell 7 (inclusive pelo `alloyctl`
+  digitado no pwsh), o `alloyctl` falhava ao carregar `Set-Acl`. Agora tira
+  do `PSModulePath` as pastas do PowerShell 7 e, se o próprio `alloy.ps1`
+  rodar no pwsh, reabre no Windows PowerShell 5.1 no mesmo console.
 
 ## [1.0.0] - 2026-11-19
 
@@ -81,5 +88,6 @@ junto.
 
 Não exige **[1] Reaplicar**: a configuração gerada é a mesma.
 
-[Não publicado]: https://github.com/DEV-ASSESSORIA-TECH/alloy/compare/v1.0.0...HEAD
+[Não publicado]: https://github.com/DEV-ASSESSORIA-TECH/alloy/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/DEV-ASSESSORIA-TECH/alloy/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/DEV-ASSESSORIA-TECH/alloy/releases/tag/v1.0.0
