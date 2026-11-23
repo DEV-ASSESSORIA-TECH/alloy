@@ -6,7 +6,7 @@ BeforeAll {
     $errors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors)
     $names = @('Test-ToolRef', 'Test-ToolSha', 'Test-ToolTag', 'Get-ToolShort', 'Get-ToolHttpErrorText',
-        'Get-ToolErrorText', 'Resolve-ToolLatest', 'Resolve-ToolVersion')
+        'Get-ToolErrorText', 'Resolve-ToolLatest', 'Resolve-ToolVersion', 'Get-WindowsPowerShellModulePath')
     $functions = $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false) |
         Where-Object { $_.Name -in $names }
     foreach ($function in $functions) { . ([scriptblock]::Create($function.Extent.Text)) }
@@ -52,5 +52,29 @@ Describe 'Validacoes' {
     It 'Get-ToolHttpErrorText explica o limite da API' {
         Get-ToolHttpErrorText 403 'main' | Should -BeLike '*limite da API*'
         Get-ToolHttpErrorText 404 'nope' | Should -BeLike "*'nope' nao existe*"
+    }
+}
+
+Describe 'Get-WindowsPowerShellModulePath' {
+    It 'tira as pastas do PowerShell 7 e mantem as do Windows PowerShell' {
+        $inherited = @(
+            'C:\Users\adm\Documents\PowerShell\Modules',
+            'C:\Program Files\PowerShell\Modules',
+            'c:\program files\powershell\7\Modules',
+            'C:\Users\adm\Documents\WindowsPowerShell\Modules',
+            'C:\Program Files\WindowsPowerShell\Modules',
+            'C:\WINDOWS\system32\WindowsPowerShell\v1.0\Modules',
+            'D:\Modulos'
+        ) -join ';'
+        Get-WindowsPowerShellModulePath $inherited | Should -Be (@(
+            'C:\Users\adm\Documents\WindowsPowerShell\Modules',
+            'C:\Program Files\WindowsPowerShell\Modules',
+            'C:\WINDOWS\system32\WindowsPowerShell\v1.0\Modules',
+            'D:\Modulos'
+        ) -join ';')
+    }
+    It 'mantem um PSModulePath limpo como esta' {
+        $clean = 'C:\Program Files\WindowsPowerShell\Modules;C:\WINDOWS\system32\WindowsPowerShell\v1.0\Modules'
+        Get-WindowsPowerShellModulePath $clean | Should -Be $clean
     }
 }

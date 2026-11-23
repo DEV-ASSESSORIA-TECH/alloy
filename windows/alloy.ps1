@@ -85,6 +85,43 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# ------------------------------------------------------ Windows PowerShell 5.1
+# O alloyctl e feito para o Windows PowerShell 5.1. Aberto a partir do pwsh 7
+# (ate pelo alloyctl.cmd, que ja chama o powershell.exe), o processo herda um
+# PSModulePath com os modulos do PowerShell 7 na frente, e o 5.1 falha ao
+# carregar cmdlets como Set-Acl ("...nao foi possivel carregar o modulo").
+# Sem as pastas do PowerShell 7 (\PowerShell\, nao \WindowsPowerShell\).
+function Get-WindowsPowerShellModulePath([string]$Value) {
+    $entries = @($Value -split ';' | Where-Object {
+        $_ -and -not ($_ -match '\\PowerShell\\' -and $_ -notmatch '\\WindowsPowerShell\\')
+    })
+    return ($entries -join ';')
+}
+if ($PSVersionTable.PSEdition -ne 'Desktop') {
+    # No pwsh 7: reabre no Windows PowerShell 5.1, no mesmo console.
+    $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not $PSCommandPath -or -not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
+        throw "Execute no Windows PowerShell 5.1 (powershell.exe), nao no PowerShell $($PSVersionTable.PSVersion)."
+    }
+    Write-Host "[alloyctl] PowerShell $($PSVersionTable.PSVersion) detectado: reabrindo no Windows PowerShell 5.1."
+    $relaunch = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
+    foreach ($key in $PSBoundParameters.Keys) {
+        $value = $PSBoundParameters[$key]
+        if ($value -is [Management.Automation.SwitchParameter]) {
+            if ($value.IsPresent) { $relaunch += "-$key" }
+        } else {
+            $relaunch += "-$key"
+            $relaunch += (@($value) -join ',')
+        }
+    }
+    $savedModulePath = $env:PSModulePath
+    $env:PSModulePath = Get-WindowsPowerShellModulePath $env:PSModulePath
+    try { & $windowsPowerShell @relaunch } finally { $env:PSModulePath = $savedModulePath }
+    exit $LASTEXITCODE
+}
+$env:PSModulePath = Get-WindowsPowerShellModulePath $env:PSModulePath
+
 if ($Command -eq 'help') { Get-Help $PSCommandPath -Detailed; return }
 $Modules = @($Modules | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if ($Modules.Count -eq 0) { $Modules = @('auto') }

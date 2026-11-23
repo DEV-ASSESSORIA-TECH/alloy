@@ -21,6 +21,10 @@ versão que já têm até alguém executar).
   diagnóstico aponta Alloy instalado em versão diferente da fixada.
   **[3] Atualizar Alloy** nunca rebaixa: um Alloy mais novo que o fixado é
   mantido, com aviso.
+- Windows: aberto a partir do PowerShell 7 (inclusive pelo `alloyctl` digitado
+  no pwsh), o `alloyctl` falhava ao carregar `Set-Acl`. Agora tira do
+  `PSModulePath` as pastas do PowerShell 7 e, se o próprio `alloy.ps1` rodar
+  no pwsh, reabre no Windows PowerShell 5.1 no mesmo console.
 - Linux: o pacote retido (`hold ok installed`) é reconhecido como instalado
   (o diagnóstico mostrava "nao instalado" e o Reaplicar ia ao APT).
 - Linux: `install.sh`, `uninstall.sh` e `heartbeat-setup.sh` mostram o
