@@ -21,8 +21,8 @@ versão que já têm até alguém executar).
   diagnóstico aponta Alloy instalado em versão diferente da fixada.
   **[3] Atualizar Alloy** nunca rebaixa: um Alloy mais novo que o fixado é
   mantido, com aviso.
-- Linux: o pacote retido (`hold ok installed`) e reconhecido como instalado
-  (o diagnostico mostrava "nao instalado" e o Reaplicar ia ao APT).
+- Linux: o pacote retido (`hold ok installed`) é reconhecido como instalado
+  (o diagnóstico mostrava "nao instalado" e o Reaplicar ia ao APT).
 - Linux: `install.sh`, `uninstall.sh` e `heartbeat-setup.sh` mostram o
   comando, a linha e o código quando algo falha (antes, com `set -e`, paravam
   só com "A operacao nao foi concluida").
