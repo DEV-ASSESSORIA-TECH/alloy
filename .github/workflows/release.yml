@@ -1,53 +1,81 @@
 name: Release
 
-# Envie uma tag vX.Y.Z a partir da main (docs/release.md). Tags com sufixo
-# (v1.2.0-rc.1) viram pre-release: nao entram no canal stable, mas podem ser
-# testadas com alloyctl --ref v1.2.0-rc.1.
+# Disparo manual na main (Actions > Release > Run workflow). Le a versao do
+# arquivo VERSION, exige a secao correspondente no CHANGELOG.md, roda a CI no
+# commit e cria a tag vX.Y.Z e a release com as notas do CHANGELOG. Ninguem
+# cria tag localmente. Versao com sufixo (1.2.0-rc.1) vira pre-release: nao
+# entra no canal stable, mas pode ser testada com alloyctl --ref v1.2.0-rc.1.
 on:
-  push:
-    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  workflow_dispatch:
 
 permissions:
   contents: write
 
-jobs:
-  ci:
-    uses: ./.github/workflows/ci.yml
+concurrency:
+  group: alloy-release
+  cancel-in-progress: false
 
-  release:
-    needs: ci
+jobs:
+  prepare:
+    name: Versao e notas
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
+      - name: Somente na main
+        run: |
+          [[ $GITHUB_REF == refs/heads/main ]] ||
+            { echo "::error::rode o Release na main (recebido: $GITHUB_REF)"; exit 1; }
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Tag na main
+      - name: Versao (VERSION)
+        id: version
         run: |
-          git fetch origin main
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main ||
-            { echo "::error::a tag $GITHUB_REF_NAME nao esta na main"; exit 1; }
-      - name: Notas do CHANGELOG
-        run: |
-          version=${GITHUB_REF_NAME#v}
-          awk -v v="$version" '
-            index($0, "## [" v "]") == 1 { found = 1; next }
-            found && /^## \[/ { exit }
-            found && /^\[[^]]+\]: / { exit }
-            found { print }
-          ' CHANGELOG.md > notes.md
-          if ! grep -q '[^[:space:]]' notes.md; then
-            echo "::error::CHANGELOG.md sem a secao ## [$version]"
-            exit 1
-          fi
-          cat notes.md
-      - name: Criar release
+          version=$(tr -d '[:space:]' < VERSION)
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] ||
+            { echo "::error file=VERSION::versao invalida: '$version' (esperado X.Y.Z)"; exit 1; }
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "versao: $version"
+      - name: Tag e release ainda nao existem
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error::a tag $TAG ja existe: suba a versao em VERSION e no CHANGELOG.md"; exit 1
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::a release $TAG ja existe"; exit 1
+          fi
+      - name: Notas do CHANGELOG
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          python3 tests/release_notes.py "${TAG#v}" > notes.md
+          cat notes.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: notes
+          path: notes.md
+
+  ci:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Tag e release
+    needs: [prepare, ci]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: notes
+      - name: Criar tag e release no commit verificado
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           flags=(--latest)
-          [[ $GITHUB_REF_NAME == *-* ]] && flags=(--prerelease --latest=false)
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release edit "$GITHUB_REF_NAME" --notes-file notes.md "${flags[@]}"
-          else
-            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md "${flags[@]}"
-          fi
+          [[ $TAG == *-* ]] && flags=(--prerelease --latest=false)
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "$TAG" --notes-file notes.md "${flags[@]}"
+          echo "publicado: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"

@@ -14,28 +14,30 @@ para validar antes de publicar.
 
 ## Passos
 
-1. Na `main`, mova os itens de **[Não publicado]** do `CHANGELOG.md` para uma
-   seção `## [X.Y.Z] - AAAA-MM-DD` e atualize os links do final. Diga se a
-   versão exige **[1] Reaplicar configuração**.
-2. Faça o merge e espere a CI ficar verde.
-3. Crie e envie a tag a partir da `main`:
+Ninguém cria tag localmente: o workflow **Release** cria a tag e a release.
 
-   ```bash
-   git checkout main && git pull
-   ```
+1. Num PR para a `main`:
+   - escreva a versão nova no arquivo `VERSION` (`X.Y.Z`);
+   - mova os itens de **[Não publicado]** do `CHANGELOG.md` para uma seção
+     `## [X.Y.Z] - AAAA-MM-DD` e atualize os links do final;
+   - diga se a versão exige **[1] Reaplicar configuração**.
 
-   ```bash
-   git tag -a vX.Y.Z -m "vX.Y.Z"
-   ```
+   A CI confere que a versão do `VERSION` tem a seção no `CHANGELOG.md`.
+2. Faça o merge e espere a CI da `main` ficar verde.
+3. No GitHub: **Actions → Release → Run workflow**, branch `main`.
+4. O workflow:
+   - recusa outro branch que não a `main`, versão inválida e tag ou release
+     que já existam;
+   - tira as notas da seção do `CHANGELOG.md`;
+   - roda a CI inteira no commit;
+   - cria a tag `vX.Y.Z` nesse commit e a release com as notas, marcada como
+     a mais recente.
 
-   ```bash
-   git push origin vX.Y.Z
-   ```
+   Em poucos minutos, toda execução do `alloyctl` no canal `stable` passa
+   para a versão nova.
 
-4. O workflow **Release** roda a CI de novo na tag, confere se o
-   `CHANGELOG.md` tem a seção da versão e cria a release com essas notas. Em
-   poucos minutos, toda execução do `alloyctl` no canal `stable` passa para a
-   versão nova.
+Versão com sufixo (`1.2.0-rc.1`) vira pre-release: não entra no `stable`, mas
+pode ser testada com `alloyctl --ref v1.2.0-rc.1`.
 
 A release é só a tag com as notas: nenhum pacote é anexado nem usado pelas
 máquinas. Os arquivos continuam vindo de

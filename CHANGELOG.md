@@ -46,6 +46,9 @@ ou acima não muda).
 - Um `alloyctl` v1.0.0 que se atualiza para esta versão baixa o
   `alloy.Dockerfile` na primeira execução (a v1.0.0 não o conhecia).
 - CI também nos branches de trabalho (`claude/**`).
+- Publicação: a versão fica no arquivo `VERSION` e a release sai pelo
+  workflow **Release**, disparado à mão na `main` (ele cria a tag). Antes era
+  preciso criar e enviar a tag localmente.
 
 ### Corrigido
 

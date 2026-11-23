@@ -105,6 +105,7 @@ alloy/
 ├── tests/                # bats (linux/), Pester (windows/), caminhos e contratos do Grafana
 ├── .github/              # ci.yml, release.yml e dependabot.yml (versão do Alloy)
 ├── alloy.Dockerfile      # versão fixa do Alloy instalada pelo alloyctl
+├── VERSION               # versão do alloyctl (publicada pelo workflow Release)
 └── CHANGELOG.md
 ```
 
